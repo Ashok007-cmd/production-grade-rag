@@ -38,7 +38,8 @@ class HybridRetriever:
         self.persist_path = (
             Path(persist_path)
             if persist_path
-            else vector_store.persist_path.parent / f"bm25_index_{vector_store.collection_name}.json"
+            else vector_store.persist_path.parent
+            / f"bm25_index_{vector_store.collection_name}.json"
         )
         self._bm25: BM25Okapi | None = None
         self._corpus_ids: list[str] = []

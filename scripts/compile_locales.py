@@ -25,7 +25,11 @@ def compile_locales() -> None:
 
     for po_path in po_files:
         mo_path = po_path.with_suffix(".mo")
-        logger.info("Compiling %s -> %s", po_path.relative_to(locale_dir.parent), mo_path.relative_to(locale_dir.parent))
+        logger.info(
+            "Compiling %s -> %s",
+            po_path.relative_to(locale_dir.parent),
+            mo_path.relative_to(locale_dir.parent),
+        )
         try:
             subprocess.run(
                 ["msgfmt", "-o", str(mo_path), str(po_path)],

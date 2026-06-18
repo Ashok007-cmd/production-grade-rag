@@ -25,6 +25,7 @@ class CrossEncoderReranker:
         if self._model is None:
             try:
                 import torch
+
                 torch.set_num_threads(1)
                 logger.info("Constraining PyTorch to 1 CPU thread.")
             except ImportError:

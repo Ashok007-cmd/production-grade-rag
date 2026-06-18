@@ -34,6 +34,7 @@ def test_i18n_context_translation() -> None:
         assert _("Question must not be empty.") == "Question must not be empty."
     finally:
         from src.utils.i18n import _current_translation
+
         _current_translation.reset(token)
 
     # Test German
@@ -59,7 +60,9 @@ def test_api_middleware_i18n_translation(api_client: TestClient) -> None:
     assert response.json()["detail"] == "Question must not be empty."
 
     # 2. German header
-    response = api_client.post("/query", json={"question": ""}, headers={"Accept-Language": "de-DE,de;q=0.9"})
+    response = api_client.post(
+        "/query", json={"question": ""}, headers={"Accept-Language": "de-DE,de;q=0.9"}
+    )
     assert response.status_code == 400
     assert response.json()["detail"] == "Die Frage darf nicht leer sein."
 
@@ -75,9 +78,21 @@ def test_multilingual_ingestion_routing(temp_chroma_dir: Path) -> None:
     pipeline.config = pipeline.config.model_copy(update={"chroma_path": temp_chroma_dir})
 
     # Prepare chunks of different languages
-    english_chunk = Chunk(content="This is a simple document written in English.", metadata={"source": "en.txt"}, doc_id="d1")
-    german_chunk = Chunk(content="Dies ist ein einfaches Dokument, das auf Deutsch verfasst wurde.", metadata={"source": "de.txt"}, doc_id="d2")
-    spanish_chunk = Chunk(content="Este es un documento simple escrito en español.", metadata={"source": "es.txt"}, doc_id="d3")
+    english_chunk = Chunk(
+        content="This is a simple document written in English.",
+        metadata={"source": "en.txt"},
+        doc_id="d1",
+    )
+    german_chunk = Chunk(
+        content="Dies ist ein einfaches Dokument, das auf Deutsch verfasst wurde.",
+        metadata={"source": "de.txt"},
+        doc_id="d2",
+    )
+    spanish_chunk = Chunk(
+        content="Este es un documento simple escrito en español.",
+        metadata={"source": "es.txt"},
+        doc_id="d3",
+    )
 
     # Group by language routing (mirroring pipeline.ingest behavior)
     # Direct write to test vector store creation and routing

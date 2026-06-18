@@ -194,7 +194,9 @@ class RAGPipeline:
 
             k = top_k or self.config.top_k_final
 
-            contexts = self._retrieve(question, use_hybrid=use_hybrid, use_reranker=use_reranker, k=k, lang=lang)
+            contexts = self._retrieve(
+                question, use_hybrid=use_hybrid, use_reranker=use_reranker, k=k, lang=lang
+            )
 
             if not contexts:
                 logger.warning("No relevant context found for query: %s", question)
@@ -279,7 +281,9 @@ class RAGPipeline:
                 )
 
             if use_reranker:
-                contexts = await asyncio.to_thread(self._apply_reranker, question, contexts, top_k=k)
+                contexts = await asyncio.to_thread(
+                    self._apply_reranker, question, contexts, top_k=k
+                )
 
             contexts_for_generation = self._apply_context_budget(contexts)
             answer = await self.generator.generate_async(question, contexts_for_generation)

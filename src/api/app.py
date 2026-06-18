@@ -62,7 +62,8 @@ app = FastAPI(
 
 _cors_origins_raw = os.environ.get("RAG_CORS_ORIGINS", "*")
 _cors_origins: list[str] = (
-    ["*"] if _cors_origins_raw.strip() == "*"
+    ["*"]
+    if _cors_origins_raw.strip() == "*"
     else [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
 )
 
@@ -78,12 +79,13 @@ app.add_middleware(
 # --- OpenAI Exception Handlers ---
 try:
     import openai
+
     @app.exception_handler(openai.RateLimitError)
     async def openai_rate_limit_handler(request: Request, exc: openai.RateLimitError):
         return Response(
             status_code=429,
             content='{"detail": "Rate limit exceeded on upstream LLM provider API."}',
-            media_type="application/json"
+            media_type="application/json",
         )
 
     @app.exception_handler(openai.APIConnectionError)
@@ -91,7 +93,7 @@ try:
         return Response(
             status_code=503,
             content='{"detail": "Failed to connect to upstream LLM provider API."}',
-            media_type="application/json"
+            media_type="application/json",
         )
 
     @app.exception_handler(openai.APIStatusError)
@@ -102,7 +104,7 @@ try:
         return Response(
             status_code=status,
             content=f'{{"detail": "Upstream LLM provider returned error status: {exc.status_code}."}}',
-            media_type="application/json"
+            media_type="application/json",
         )
 except ImportError:
     pass
@@ -110,12 +112,13 @@ except ImportError:
 # --- Anthropic Exception Handlers ---
 try:
     import anthropic
+
     @app.exception_handler(anthropic.RateLimitError)
     async def anthropic_rate_limit_handler(request: Request, exc: anthropic.RateLimitError):
         return Response(
             status_code=429,
             content='{"detail": "Rate limit exceeded on upstream LLM provider API."}',
-            media_type="application/json"
+            media_type="application/json",
         )
 
     @app.exception_handler(anthropic.APIConnectionError)
@@ -123,7 +126,7 @@ try:
         return Response(
             status_code=503,
             content='{"detail": "Failed to connect to upstream LLM provider API."}',
-            media_type="application/json"
+            media_type="application/json",
         )
 
     @app.exception_handler(anthropic.APIStatusError)
@@ -134,7 +137,7 @@ try:
         return Response(
             status_code=status,
             content=f'{{"detail": "Upstream LLM provider returned error status: {exc.status_code}."}}',
-            media_type="application/json"
+            media_type="application/json",
         )
 except ImportError:
     pass
@@ -265,7 +268,9 @@ async def ingest(request: IngestRequest) -> IngestResponse:
     if not source_path.exists():
         raise HTTPException(
             status_code=400,
-            detail=_("Source path does not exist: {source_path}").format(source_path=request.source),
+            detail=_("Source path does not exist: {source_path}").format(
+                source_path=request.source
+            ),
         )
 
     pipeline = get_pipeline()

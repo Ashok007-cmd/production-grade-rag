@@ -48,7 +48,13 @@ def retry_with_backoff(
                 logger.error("Failed after %d retries: %s", retries, e)
                 raise
             sleep = backoff_in_seconds * (2**x)
-            logger.warning("Transient error (attempt %d/%d): %s. Retrying in %.1fs...", x + 1, retries, e, sleep)
+            logger.warning(
+                "Transient error (attempt %d/%d): %s. Retrying in %.1fs...",
+                x + 1,
+                retries,
+                e,
+                sleep,
+            )
             time.sleep(sleep)
             x += 1
 
@@ -73,6 +79,12 @@ async def async_retry_with_backoff(
                 logger.error("Failed after %d retries: %s", retries, e)
                 raise
             sleep = backoff_in_seconds * (2**x)
-            logger.warning("Transient error (attempt %d/%d): %s. Retrying in %.1fs...", x + 1, retries, e, sleep)
+            logger.warning(
+                "Transient error (attempt %d/%d): %s. Retrying in %.1fs...",
+                x + 1,
+                retries,
+                e,
+                sleep,
+            )
             await asyncio.sleep(sleep)
             x += 1

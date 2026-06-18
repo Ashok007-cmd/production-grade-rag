@@ -38,11 +38,17 @@ def test_query_response_usage_headers(api_client: TestClient) -> None:
         # Async method returns mock_response
         async def mock_chat_completion(*args, **kwargs):
             return mock_response
+
         mock_client_instance.chat.completions.create = mock_chat_completion
 
         # Mock vector store retrieve
-        with patch("src.pipeline.RAGPipeline._retrieve", return_value=[{"document": "test doc context", "metadata": {"source": "test.txt"}}]):
-            response = api_client.post("/query", json={"question": "What is the secret of the universe?"})
+        with patch(
+            "src.pipeline.RAGPipeline._retrieve",
+            return_value=[{"document": "test doc context", "metadata": {"source": "test.txt"}}],
+        ):
+            response = api_client.post(
+                "/query", json={"question": "What is the secret of the universe?"}
+            )
 
             assert response.status_code == 200
             headers = response.headers
@@ -77,7 +83,10 @@ def test_openai_rate_limit_exception_mapping(api_client: TestClient) -> None:
         mock_openai_cls.return_value = mock_client_instance
         mock_client_instance.chat.completions.create = mock_raise
 
-        with patch("src.pipeline.RAGPipeline._retrieve", return_value=[{"document": "test doc", "metadata": {"source": "t.txt"}}]):
+        with patch(
+            "src.pipeline.RAGPipeline._retrieve",
+            return_value=[{"document": "test doc", "metadata": {"source": "t.txt"}}],
+        ):
             response = api_client.post("/query", json={"question": "Trigger rate limit"})
 
             assert response.status_code == 429
@@ -96,7 +105,10 @@ def test_openai_connection_exception_mapping(api_client: TestClient) -> None:
         mock_openai_cls.return_value = mock_client_instance
         mock_client_instance.chat.completions.create = mock_raise
 
-        with patch("src.pipeline.RAGPipeline._retrieve", return_value=[{"document": "test doc", "metadata": {"source": "t.txt"}}]):
+        with patch(
+            "src.pipeline.RAGPipeline._retrieve",
+            return_value=[{"document": "test doc", "metadata": {"source": "t.txt"}}],
+        ):
             response = api_client.post("/query", json={"question": "Trigger connection error"})
 
             assert response.status_code == 503

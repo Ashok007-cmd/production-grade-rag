@@ -49,6 +49,7 @@ class VectorStore:
 
         # Initialise ChromaDB client
         if self.chroma_host:
+
             def _init_client():
                 client = chromadb.HttpClient(
                     host=self.chroma_host,
@@ -148,6 +149,7 @@ class VectorStore:
 
         Returns a list of dicts with keys: id, document, metadata, distance.
         """
+
         def _search():
             return self._collection.query(
                 query_texts=[query],
@@ -162,8 +164,10 @@ class VectorStore:
 
     def get_all_chunks(self) -> list[dict[str, Any]]:
         """Retrieve all chunks (used for hybrid index building)."""
+
         def _get():
             return self._collection.get(include=["documents", "metadatas"])
+
         results = retry_with_backoff(_get, retries=3, backoff_in_seconds=0.5)
         return self._format_get_results(results)
 
@@ -173,19 +177,23 @@ class VectorStore:
 
     def delete_collection(self) -> None:
         """Delete the entire collection."""
+
         def _delete():
             self._client.delete_collection(self.collection_name)
             self._collection = self._client.get_or_create_collection(
                 name=self.collection_name,
                 embedding_function=self._embedding_fn,  # type: ignore[arg-type]
             )
+
         retry_with_backoff(_delete, retries=3, backoff_in_seconds=0.5)
         logger.info("Deleted and recreated collection '%s'", self.collection_name)
 
     def delete_chunks(self, chunk_ids: list[str]) -> None:
         """Remove specific chunks by ID."""
+
         def _delete_ids():
             self._collection.delete(ids=chunk_ids)
+
         retry_with_backoff(_delete_ids, retries=3, backoff_in_seconds=0.5)
 
     # ------------------------------------------------------------------
@@ -278,6 +286,7 @@ class _ChromaEmbeddingFunction:
 
         try:
             import torch
+
             torch.set_num_threads(1)
             logger.info("Constraining PyTorch to 1 CPU thread.")
         except ImportError:
