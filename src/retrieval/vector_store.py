@@ -49,10 +49,11 @@ class VectorStore:
 
         # Initialise ChromaDB client
         if self.chroma_host:
+            _host: str = self.chroma_host  # narrow str | None → str for the closure
 
             def _init_client():
                 client = chromadb.HttpClient(
-                    host=self.chroma_host,
+                    host=_host,
                     port=self.chroma_port or 8000,
                     settings=ChromaSettings(anonymized_telemetry=False),
                 )
@@ -70,7 +71,7 @@ class VectorStore:
         def _get_or_create():
             return self._client.get_or_create_collection(
                 name=collection_name,
-                embedding_function=self._embedding_fn,  # type: ignore[arg-type]
+                embedding_function=self._embedding_fn,
                 metadata={"hnsw:space": "cosine"},
             )
 
@@ -182,7 +183,7 @@ class VectorStore:
             self._client.delete_collection(self.collection_name)
             self._collection = self._client.get_or_create_collection(
                 name=self.collection_name,
-                embedding_function=self._embedding_fn,  # type: ignore[arg-type]
+                embedding_function=self._embedding_fn,
             )
 
         retry_with_backoff(_delete, retries=3, backoff_in_seconds=0.5)
