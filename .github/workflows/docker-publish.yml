@@ -8,6 +8,11 @@ on:
     tags: ["v*.*.*"]
   workflow_dispatch:
 
+# Grant write:packages at workflow level so GITHUB_TOKEN can push to GHCR.
+permissions:
+  contents: read
+  packages: write
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
