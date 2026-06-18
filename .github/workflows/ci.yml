@@ -1,0 +1,54 @@
+name: CI — Tests & Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Lint with ruff
+        run: ruff check src/ tests/ scripts/
+
+      - name: Check formatting
+        run: ruff format --check src/ tests/ scripts/
+
+      - name: Type-check with mypy
+        run: mypy src/
+
+      - name: Run tests with coverage
+        run: |
+          python -m pytest tests/ \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            -v
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false

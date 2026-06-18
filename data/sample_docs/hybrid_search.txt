@@ -1,0 +1,21 @@
+Hybrid Search for Enhanced Retrieval
+
+Hybrid search combines the strengths of two fundamentally different retrieval approaches: keyword-based (sparse) retrieval and semantic (dense) retrieval.
+
+BM25 Keyword Search
+
+BM25 is a classic information retrieval algorithm that ranks documents based on term frequency and inverse document frequency. It excels at exact keyword matching, making it ideal for queries that contain specific technical terms, proper names, or identifiers. BM25 is fast, interpretable, and requires no training data. However, it struggles with synonyms, paraphrases, and semantic relationships — a search for "automobile" won't match documents about "cars."
+
+Vector (Semantic) Search
+
+Vector search uses neural embeddings to capture semantic meaning. Sentences with similar meanings are mapped to nearby points in a high-dimensional vector space, regardless of whether they share exact keywords. This makes vector search robust to vocabulary mismatches and capable of understanding nuanced queries. The trade-off is that it can miss exact matches that BM25 would catch easily.
+
+Reciprocal Rank Fusion (RRF)
+
+RRF is a simple yet effective method for combining multiple ranking lists into a single relevance score. Each document receives a score based on its reciprocal rank position in each list:
+
+Score(d) = Σ (1 / (k + rank_i(d)))
+
+Where k is a constant (typically 60) that controls how quickly rank contributions diminish. RRF is robust to score distribution differences between methods and requires no training.
+
+The alpha parameter controls the balance between vector and keyword contributions. An alpha of 0.6 means 60% weight on vector search and 40% on BM25, which is a common starting point for many domains.

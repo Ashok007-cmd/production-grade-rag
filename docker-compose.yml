@@ -1,0 +1,46 @@
+services:
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: rag-chromadb
+    volumes:
+      - chroma_data:/chroma/chroma
+    ports:
+      - "8001:8000"
+    environment:
+      - ANONYMIZED_TELEMETRY=False
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-api
+    ports:
+      - "8000:8000"
+    environment:
+      - RAG_CHROMA_HOST=chroma
+      - RAG_CHROMA_PORT=8000
+      - RAG_LLM_PROVIDER=openai
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      chroma:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  chroma_data:

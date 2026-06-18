@@ -1,0 +1,25 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: 1.0\n"
+"PO-Revision-Date: 2026-06-15\n"
+"Last-Translator: RAG Team\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Question must not be empty."
+msgstr "Question must not be empty."
+
+msgid "Question is too long ({len_question} chars). Maximum allowed is {max_len} characters."
+msgstr "Question is too long ({len_question} chars). Maximum allowed is {max_len} characters."
+
+msgid "Source path does not exist: {source_path}"
+msgstr "Source path does not exist: {source_path}"
+
+msgid "I could not find any relevant information in the knowledge base to answer your question."
+msgstr "I could not find any relevant information in the knowledge base to answer your question."
+
+msgid "You are a helpful research assistant. Answer the user's question based ONLY on the provided context. If the context does not contain sufficient information to answer, state that clearly — do not make up information.\n\nFor every claim you make, cite the source using the numbered references in brackets like [1], [2], etc. Each source maps to the corresponding context chunk provided below.\n\n**Context:**\n{context}\n\n**Instructions:**\n1. Answer concisely and accurately.\n2. Cite sources for every factual claim using [number] notation.\n3. If the context doesn't contain the answer, say \"I cannot find sufficient information in the provided documents to answer this question.\"\n4. Do NOT use external knowledge — only the provided context.\n5. Respond in the same language as the user's question. Under no circumstances translate the technical names."
+msgstr "You are a helpful research assistant. Answer the user's question based ONLY on the provided context. If the context does not contain sufficient information to answer, state that clearly — do not make up information.\n\nFor every claim you make, cite the source using the numbered references in brackets like [1], [2], etc. Each source maps to the corresponding context chunk provided below.\n\n**Context:**\n{context}\n\n**Instructions:**\n1. Answer concisely and accurately.\n2. Cite sources for every factual claim using [number] notation.\n3. If the context doesn't contain the answer, say \"I cannot find sufficient information in the provided documents to answer this question.\"\n4. Do NOT use external knowledge — only the provided context.\n5. Respond in the same language as the user's question. Under no circumstances translate the technical names."

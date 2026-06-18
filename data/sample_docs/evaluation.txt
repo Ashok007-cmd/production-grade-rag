@@ -1,0 +1,34 @@
+Evaluating RAG System Quality
+
+RAG evaluation is critical for ensuring production systems deliver accurate, trustworthy answers. Unlike traditional search evaluation, RAG evaluation must assess both the retrieval and generation components, as well as their interaction.
+
+Dimensions of RAG Quality
+
+1. Faithfulness (Groundedness): Does the generated answer contain only claims that are supported by the retrieved context? This is the most important metric for RAG systems. An unfaithful answer may be fluent and plausible while being factually incorrect or hallucinated.
+
+2. Answer Relevance: Does the answer address the user's question? A faithful but irrelevant answer is still a poor experience.
+
+3. Context Precision: How much of the retrieved context is actually relevant to the question? High context precision means efficient use of the LLM's context window.
+
+4. Context Recall: Are all relevant documents retrieved? Low context recall means the LLM may miss important information.
+
+Faithfulness Evaluation via LLM-as-Judge
+
+A common approach for automated faithfulness evaluation uses an LLM as a judge. The judge LLM is given the retrieved context and the generated answer, and is asked to identify any claims in the answer that are not supported by the context. This approach correlates well with human judgment when using capable models like GPT-4 or Claude.
+
+The judge evaluates each claim in the answer against the context and produces:
+- A binary faithful/unfaithful judgment
+- A continuous faithfulness score (0.0 to 1.0)
+- A list of unsupported claims
+
+Golden Evaluation Datasets
+
+A golden dataset is a curated collection of question-answer pairs with verified reference answers and expected source documents. It serves as the ground truth for regression testing. Best practices include:
+- Covering diverse query types (factual, comparative, procedural)
+- Including edge cases (ambiguous queries, out-of-domain questions)
+- Having at least 20-50 examples for statistical significance
+- Version-controlling the dataset alongside the code
+
+CI Integration
+
+Evaluation can be integrated into CI pipelines to automatically flag regressions. When a change degrades answer faithfulness below a threshold (e.g., average faithfulness < 0.7), the build fails, preventing quality regressions from reaching production.

@@ -1,0 +1,101 @@
+name: Evaluate — RAG Faithfulness Quality Gate
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      fail_on_threshold:
+        description: Fail if faithfulness is below threshold
+        type: boolean
+        default: true
+
+jobs:
+  evaluate:
+    name: RAG Evaluation Quality Gate
+    runs-on: ubuntu-latest
+    # Only run on internal pushes/dispatches — secrets are not passed to fork PRs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Cache embedding and reranker models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-${{ hashFiles('src/config.py') }}
+          restore-keys: |
+            hf-models-
+
+      - name: Ingest sample documents
+        run: python -m scripts.ingest --source data/sample_docs --reset
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Create evaluation dataset (if missing)
+        run: python -m scripts.evaluate --create-sample-dataset
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Run evaluation with quality gate
+        id: eval
+        run: |
+          python -m scripts.evaluate \
+            --hybrid \
+            --reranker \
+            --fail-on-threshold \
+            --export-ci-summary
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Upload evaluation summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-summary
+          path: eval-summary.json
+
+      - name: Post evaluation summary as PR comment
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let summary = {};
+            try {
+              summary = JSON.parse(fs.readFileSync('eval-summary.json', 'utf8'));
+            } catch (e) {
+              console.log('Could not read eval-summary.json');
+              return;
+            }
+            const passed = summary.threshold_met ? '✅ PASSED' : '❌ FAILED';
+            const body = [
+              `## RAG Quality Gate — ${passed}`,
+              '',
+              `| Metric | Value |`,
+              `|--------|-------|`,
+              `| Examples evaluated | ${summary.count} |`,
+              `| Pass rate | ${(summary.pass_rate * 100).toFixed(1)}% |`,
+              `| Avg faithfulness | ${summary.avg_faithfulness?.toFixed(4)} |`,
+              `| Min faithfulness | ${summary.min_faithfulness?.toFixed(4)} |`,
+              `| Faithfulness threshold | ${summary.faithfulness_threshold} |`,
+              `| Avg answer relevance | ${summary.avg_answer_relevance?.toFixed(4)} |`,
+            ].join('\n');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });

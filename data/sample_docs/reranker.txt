@@ -1,0 +1,23 @@
+Cross-Encoder Re-rankers in RAG Systems
+
+Bi-Encoders vs Cross-Encoders
+
+In a typical RAG pipeline, the initial retrieval step uses a bi-encoder architecture. The query and each document are independently encoded into fixed-size vectors, and similarity is computed via a dot product or cosine distance. This approach is efficient because all document embeddings can be precomputed and indexed, enabling fast retrieval over millions of documents.
+
+However, bi-encoders have a fundamental limitation: the query and document do not interact during encoding. This means subtle relevance signals can be lost. Cross-encoders address this by jointly encoding the query and document together through a single transformer pass, allowing for deep attention-based interactions between every token of the query and document.
+
+Why Re-rank?
+
+Cross-encoders are too slow to use for initial retrieval over a large corpus (they require O(n) forward passes). Instead, they are applied as a re-ranking step: the bi-encoder first retrieves a broad set of candidates (e.g., top-20), and the cross-encoder scores each candidate to produce a more precise top-5.
+
+Trade-offs
+
+- Precision: Cross-encoders significantly improve retrieval precision, often by 10-20% over bi-encoders alone.
+- Latency: Each query-document pair requires a separate forward pass, adding 50-500ms per pair depending on model size.
+- Throughput: For real-time applications, re-ranking more than 50-100 candidates becomes impractical.
+- Model Size: MiniLM-based cross-encoders offer a good balance of speed and accuracy (~80MB).
+
+Popular cross-encoder models for re-ranking include:
+- cross-encoder/ms-marco-MiniLM-L-6-v2 (fast, good accuracy)
+- cross-encoder/ms-marco-MiniLM-L-12-v2 (higher accuracy, slower)
+- BAAI/bge-reranker-v2-m3 (multilingual, strong performance)
