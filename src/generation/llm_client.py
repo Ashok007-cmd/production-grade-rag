@@ -115,6 +115,7 @@ class LLMClient:
             )
 
         import time
+
         from src.utils.usage import request_usage
 
         start_time = time.perf_counter()
@@ -160,6 +161,7 @@ class LLMClient:
                 )
 
         import time
+
         from src.utils.usage import request_usage
 
         start_time = time.perf_counter()
@@ -199,6 +201,7 @@ class LLMClient:
             )
 
         import time
+
         from src.utils.usage import request_usage
 
         start_time = time.perf_counter()
@@ -244,6 +247,7 @@ class LLMClient:
                 )
 
         import time
+
         from src.utils.usage import request_usage
 
         start_time = time.perf_counter()

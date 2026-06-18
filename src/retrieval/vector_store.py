@@ -108,12 +108,14 @@ class VectorStore:
         # Chroma handles embeddings internally via the embedding function
         for start in range(0, len(ids), batch_size):
             end = start + batch_size
-            def _add_batch():
+
+            def _add_batch(_s: int = start, _e: int = end) -> None:
                 self._collection.add(
-                    ids=ids[start:end],
-                    documents=documents[start:end],
-                    metadatas=metadatas[start:end],
+                    ids=ids[_s:_e],
+                    documents=documents[_s:_e],
+                    metadatas=metadatas[_s:_e],
                 )
+
             retry_with_backoff(_add_batch, retries=3, backoff_in_seconds=0.5)
         logger.info("Added %d chunks to collection '%s'", len(ids), self.collection_name)
         return len(ids)
@@ -254,7 +256,7 @@ class _ChromaEmbeddingFunction:
         return {"model_name": self.model_name}
 
     @classmethod
-    def build_from_config(cls, config: dict[str, Any]) -> "_ChromaEmbeddingFunction":
+    def build_from_config(cls, config: dict[str, Any]) -> _ChromaEmbeddingFunction:
         return cls(model_name=config.get("model_name", "sentence-transformers/all-MiniLM-L6-v2"))
 
     @staticmethod

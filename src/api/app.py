@@ -9,10 +9,11 @@ Run locally with:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response, Request, Depends, Header
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -23,8 +24,9 @@ from src.utils.i18n import _
 
 
 async def setup_locale(accept_language: str | None = Header(None)):
-    from src.utils.i18n import _current_translation
     import gettext
+
+    from src.utils.i18n import _current_translation
 
     lang = "en"
     if accept_language:
@@ -50,8 +52,6 @@ async def setup_locale(accept_language: str | None = Header(None)):
     finally:
         _current_translation.reset(token)
 
-
-import os
 
 app = FastAPI(
     title="Production RAG API",
@@ -260,7 +260,7 @@ async def ingest(request: IngestRequest) -> IngestResponse:
         raise HTTPException(
             status_code=400,
             detail=f"Path must be inside the configured data directory ({allowed_root}).",
-        )
+        ) from None
 
     if not source_path.exists():
         raise HTTPException(
@@ -286,7 +286,7 @@ async def ingest(request: IngestRequest) -> IngestResponse:
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest, response: Response) -> QueryResponse:
     """Answer a question using the RAG pipeline."""
-    from src.utils.usage import request_usage, UsageTracker
+    from src.utils.usage import UsageTracker, request_usage
 
     tracker = UsageTracker()
     token = request_usage.set(tracker)

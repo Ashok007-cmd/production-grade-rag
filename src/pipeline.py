@@ -175,7 +175,7 @@ class RAGPipeline:
         Raises:
             ValueError: If the question is empty or exceeds the maximum length.
         """
-        from src.utils.i18n import _current_translation, _
+        from src.utils.i18n import _, _current_translation
 
         lang = _detect_language(question)
         token = _setup_translation(lang)
@@ -241,7 +241,7 @@ class RAGPipeline:
         """
         import asyncio
 
-        from src.utils.i18n import _current_translation, _
+        from src.utils.i18n import _, _current_translation
 
         lang = _detect_language(question)
         token = _setup_translation(lang)

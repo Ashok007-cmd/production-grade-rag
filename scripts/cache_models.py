@@ -38,7 +38,7 @@ def cache_models() -> None:
         try:
             _ = SentenceTransformer(model_name)
             logger.info("Successfully cached embedding model: %s", model_name)
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to cache embedding model: %s", model_name)
             sys.exit(1)
 
@@ -48,7 +48,7 @@ def cache_models() -> None:
         try:
             _ = CrossEncoder(model_name)
             logger.info("Successfully cached reranker model: %s", model_name)
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to cache reranker model: %s", model_name)
             sys.exit(1)
 

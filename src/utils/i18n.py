@@ -9,16 +9,18 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ContextVar containing the active gettext Translation object for the request.
-# Defaults to NullTranslations (which returns English/raw strings).
+# ContextVar holding the active translation for the current context.
+# None means "no translation set yet" — get_translation() falls back to NullTranslations.
 _current_translation: contextvars.ContextVar[
-    gettext.NullTranslations | gettext.GNUTranslations
-] = contextvars.ContextVar("current_translation", default=gettext.NullTranslations())
+    gettext.NullTranslations | gettext.GNUTranslations | None
+] = contextvars.ContextVar("current_translation", default=None)
+
+_NULL_TRANSLATIONS = gettext.NullTranslations()
 
 
 def get_translation() -> gettext.NullTranslations | gettext.GNUTranslations:
-    """Return the active translation object."""
-    return _current_translation.get()
+    """Return the active translation object, falling back to NullTranslations."""
+    return _current_translation.get() or _NULL_TRANSLATIONS
 
 
 def _(message: str) -> str:
