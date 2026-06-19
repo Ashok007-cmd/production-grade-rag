@@ -8,14 +8,13 @@ on:
     tags: ["v*.*.*"]
   workflow_dispatch:
 
-# Grant write:packages at workflow level so GITHUB_TOKEN can push to GHCR.
 permissions:
   contents: read
   packages: write
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: ${{ github.repository_owner }}/production-rag
 
 jobs:
   build-and-push:
@@ -34,7 +33,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.CR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract Docker metadata
         id: meta
