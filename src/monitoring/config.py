@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-import logging
 from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +55,6 @@ class MonitoringSettings(BaseSettings):
         return stripped
 
 
-
 class PricingConfig:
     _cache: dict[str, dict[str, Any]] = {}
 
@@ -65,7 +62,7 @@ class PricingConfig:
         self.path = Path(pricing_path)
         if not self.path.exists():
             self.path = Path(__file__).parent.parent / pricing_path
-        
+
         self.abs_path = str(self.path.resolve())
         self._last_loaded = 0.0
         self._data: dict[str, Any] = {}
@@ -99,6 +96,7 @@ class PricingConfig:
 
         if not model_data:
             import re
+
             for key, val in provider_data.items():
                 # Escape all regex metacharacters in literal segments, then restore * wildcards.
                 # This prevents ReDoS if pricing.json contains crafted model-name patterns.
@@ -113,7 +111,6 @@ class PricingConfig:
         input_price = model_data.get("input", 0.0) / 1000
         output_price = model_data.get("output", 0.0) / 1000
         return (prompt_tokens * input_price) + (completion_tokens * output_price)
-
 
 
 settings = MonitoringSettings()

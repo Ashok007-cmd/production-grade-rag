@@ -1,7 +1,7 @@
-from .config import settings, PricingConfig
-from .tracing import Tracer
+from .config import PricingConfig, settings
 from .metrics import MetricsCollector
 from .prompts import PromptRegistry
+from .tracing import Tracer
 from .wrappers import MonitoredRAGPipeline
 
 __all__ = [
@@ -12,4 +12,3 @@ __all__ = [
     "PromptRegistry",
     "MonitoredRAGPipeline",
 ]
-

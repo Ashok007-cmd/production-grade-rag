@@ -1,24 +1,24 @@
 from __future__ import annotations
 
+import concurrent.futures
 import logging
-import time
 import queue
 import threading
-import concurrent.futures
-from typing import Any, Dict, List, Optional
+import time
 from pathlib import Path
+from typing import Any
 
-from .config import settings, PricingConfig
-from .tracing import Tracer
+from .config import settings
 from .metrics import MetricsCollector
 from .prompts import PromptRegistry
+from .tracing import Tracer
 
 logger = logging.getLogger(__name__)
 
 
 class CircuitBreaker:
     """Sliding-window circuit breaker for telemetry backends.
-    
+
     Prevents downstream outages (e.g. Langfuse / OTel Collector down) from
     blocking or slowing down the primary RAG application execution.
     """
@@ -48,7 +48,7 @@ class CircuitBreaker:
                         "Telemetry backend failed %d consecutive times. Circuit Breaker tripped to OPEN. "
                         "Telemetry operations will be bypassed for %s seconds.",
                         self.failures,
-                        self.cooldown_seconds
+                        self.cooldown_seconds,
                     )
                     self.state = "OPEN"
 
@@ -60,7 +60,9 @@ class CircuitBreaker:
                 now = time.monotonic()
                 if now - self.last_failure_time > self.cooldown_seconds:
                     self.state = "HALF-OPEN"
-                    logger.warning("Telemetry Circuit Breaker in HALF-OPEN state. Testing backend connection...")
+                    logger.warning(
+                        "Telemetry Circuit Breaker in HALF-OPEN state. Testing backend connection..."
+                    )
                     return True
                 return False
             return True
@@ -71,7 +73,9 @@ class TelemetryQueueWorker:
 
     def __init__(self, max_workers: int = 2) -> None:
         self._queue: queue.Queue = queue.Queue(maxsize=settings.max_queue_size)
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="telemetry-worker")
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="telemetry-worker"
+        )
         self._stop_event = threading.Event()
         self._worker_thread = threading.Thread(target=self._run, daemon=True)
         self._worker_thread.start()
@@ -82,8 +86,10 @@ class TelemetryQueueWorker:
         try:
             self._queue.put_nowait((fn, args, kwargs))
         except queue.Full:
-            logger.warning("Telemetry queue is full (max capacity: %d). Dropping payload to apply backpressure.", settings.max_queue_size)
-
+            logger.warning(
+                "Telemetry queue is full (max capacity: %d). Dropping payload to apply backpressure.",
+                settings.max_queue_size,
+            )
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
@@ -103,7 +109,6 @@ class TelemetryQueueWorker:
                     self._queue.task_done()
             except queue.Empty:
                 continue
-
 
     def _safe_execute(self, fn: Any, *args: Any, **kwargs: Any) -> None:
         try:
@@ -129,13 +134,14 @@ def get_telemetry_worker() -> TelemetryQueueWorker:
             if _async_worker is None:
                 _async_worker = TelemetryQueueWorker()
                 import atexit
+
                 atexit.register(_async_worker.shutdown)
     return _async_worker
 
 
 class BaseExtension:
     """Base class for monitoring extensions.
-    
+
     Implement these lifecycle hooks to intercept and monitor queries, steps,
     and model generations.
     """
@@ -200,7 +206,6 @@ class BaseExtension:
         pass
 
 
-
 class LangfuseTracingExtension(BaseExtension):
     """Extension to handle Langfuse tracing for pipeline operations."""
 
@@ -211,7 +216,7 @@ class LangfuseTracingExtension(BaseExtension):
         self._prompt_registry = PromptRegistry(registry_path)
         self._cb = CircuitBreaker(
             failure_threshold=settings.circuit_breaker_threshold,
-            cooldown_seconds=settings.circuit_breaker_cooldown_seconds
+            cooldown_seconds=settings.circuit_breaker_cooldown_seconds,
         )
         self._async = False  # Must run synchronously to preserve thread-local trace nesting
         self._worker = get_telemetry_worker()
@@ -250,12 +255,10 @@ class LangfuseTracingExtension(BaseExtension):
             self._local.step_spans = {}
         return self._local.step_spans
 
-
-
     def _execute(self, fn: Any, *args: Any, **kwargs: Any) -> None:
         if not self._cb.allow_request():
             return
-        
+
         def run_task():
             try:
                 fn(*args, **kwargs)
@@ -273,7 +276,9 @@ class LangfuseTracingExtension(BaseExtension):
         if not self._cb.allow_request():
             return
         try:
-            self._ctx = self.tracer.trace_step("query", input={"question": question}, metadata=metadata)
+            self._ctx = self.tracer.trace_step(
+                "query", input={"question": question}, metadata=metadata
+            )
             self._span = self._ctx.__enter__()
         except Exception as e:
             logger.warning("Failed to start query trace: %s", e)
@@ -374,12 +379,14 @@ class LangfuseTracingExtension(BaseExtension):
     ) -> None:
         if not self._cb.allow_request():
             return
-        
+
         # Registry and capture generation must be handled carefully.
         # Registering prompt baseline happens on caller's thread to catch baseline issues,
         # but generation logging can run in background.
         try:
-            prompt_name = "default_system_prompt" if "custom" not in prompt else "custom_system_prompt"
+            prompt_name = (
+                "default_system_prompt" if "custom" not in prompt else "custom_system_prompt"
+            )
             self._prompt_registry.register(
                 prompt_name,
                 prompt,
@@ -393,6 +400,7 @@ class LangfuseTracingExtension(BaseExtension):
             active_span = self.tracer._active_spans[-1]
 
         if active_span:
+
             def task():
                 self.tracer.capture_generation(
                     span=active_span,
@@ -405,6 +413,7 @@ class LangfuseTracingExtension(BaseExtension):
                     completion_tokens=usage.get("completion_tokens", 0),
                     total_tokens=usage.get("total_tokens", 0),
                 )
+
             self._execute(task)
 
 
@@ -415,7 +424,7 @@ class OTelMetricsExtension(BaseExtension):
         self.metrics = metrics or MetricsCollector(enabled=settings.enabled, prefix="rag")
         self._cb = CircuitBreaker(
             failure_threshold=settings.circuit_breaker_threshold,
-            cooldown_seconds=settings.circuit_breaker_cooldown_seconds
+            cooldown_seconds=settings.circuit_breaker_cooldown_seconds,
         )
         self._async = settings.async_telemetry
         self._worker = get_telemetry_worker()
@@ -431,7 +440,11 @@ class OTelMetricsExtension(BaseExtension):
             # Still append to local tracking lists for CI gating verification!
             # (the OTel collector metrics methods themselves will be bypassed)
             # This is critical so local tests/summaries still get populated even if OTel collector is missing.
-            if fn.__name__ == "record_latency" and args and (args[0] == "query_total" or args[0] == "query"):
+            if (
+                fn.__name__ == "record_latency"
+                and args
+                and (args[0] == "query_total" or args[0] == "query")
+            ):
                 self.metrics.latencies.append(args[1])
             elif fn.__name__ == "record_cost":
                 self.metrics.costs.append(args[0])
@@ -487,7 +500,7 @@ class OTelMetricsExtension(BaseExtension):
                         self._ttft_hist = self.metrics._meter.create_histogram(
                             name=f"{self.metrics.prefix}_time_to_first_token_seconds",
                             description="Time to first token in streaming queries",
-                            unit="s"
+                            unit="s",
                         )
                     if hasattr(self, "_ttft_hist"):
                         self._ttft_hist.record(ttft)
@@ -500,8 +513,6 @@ class OTelMetricsExtension(BaseExtension):
                 run_task()
             else:
                 self._worker.submit(run_task)
-
-
 
     def on_step_end(
         self,
@@ -518,14 +529,17 @@ class OTelMetricsExtension(BaseExtension):
 
 class GuardrailExtension(BaseExtension):
     """Custom pluggable extension validating content for real-time safety.
-    
+
     If output toxicity or length violations are detected, raises a ValueError
     to block the query response instantly.
     """
 
     def __init__(self, max_length: int = 5000, blocked_keywords: list[str] | None = None) -> None:
         self.max_length = max_length
-        self.blocked_keywords = blocked_keywords or ["restricted_secret_api_key", "internal_confidential"]
+        self.blocked_keywords = blocked_keywords or [
+            "restricted_secret_api_key",
+            "internal_confidential",
+        ]
 
     def on_query_start(self, question: str, metadata: dict[str, Any]) -> None:
         for keyword in self.blocked_keywords:
@@ -544,4 +558,6 @@ class GuardrailExtension(BaseExtension):
             raise ValueError("Response length exceeds guardrail configuration limit")
         for keyword in self.blocked_keywords:
             if keyword in answer:
-                raise ValueError("Response blocked by real-time output policy (contains restricted keywords)")
+                raise ValueError(
+                    "Response blocked by real-time output policy (contains restricted keywords)"
+                )

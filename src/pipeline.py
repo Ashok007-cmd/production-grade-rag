@@ -83,6 +83,7 @@ class RAGPipeline:
         self._vector_stores: dict[str, VectorStore] = {}
         self._hybrid_retrievers: dict[str, HybridRetriever] = {}
         import threading
+
         self._lock = threading.RLock()
 
         # Generation

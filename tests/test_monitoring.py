@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+from src.monitoring.extensions import GuardrailExtension, OTelMetricsExtension
 from src.monitoring.metrics import MetricsCollector
 from src.monitoring.tracing import Tracer
 from src.monitoring.wrappers import MonitoredRAGPipeline
-from src.monitoring.extensions import GuardrailExtension, OTelMetricsExtension
 
 
 class TestTracer:
@@ -93,6 +93,7 @@ class TestGuardrailExtension:
     def test_blocks_query_with_keyword(self) -> None:
         guard = GuardrailExtension(blocked_keywords=["forbidden"])
         import pytest
+
         with pytest.raises(ValueError, match="forbidden"):
             guard.on_query_start("tell me forbidden secrets", {})
 
@@ -103,6 +104,7 @@ class TestGuardrailExtension:
     def test_blocks_long_response(self) -> None:
         guard = GuardrailExtension(max_length=10)
         import pytest
+
         with pytest.raises(ValueError, match="length"):
             guard.on_query_end("A" * 11, [], 0.1, {}, 0.0)
 

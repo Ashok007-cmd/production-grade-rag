@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import uuid
 import logging
 import threading
+import uuid
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any
 
-from .config import settings, PricingConfig
+from .config import PricingConfig, settings
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,6 @@ class Tracer:
     def _active_spans(self, val: list[Any]) -> None:
         self._local.active_spans = val
 
-
     def _init_langfuse(self) -> None:
         try:
             from langfuse import Langfuse as LangfuseClient
@@ -79,7 +79,12 @@ class Tracer:
         metadata: dict[str, Any] | None = None,
     ) -> Generator[Any, None, None]:
         if not self.enabled or self._langfuse is None:
-            span: dict[str, Any] = {"name": name, "input": input or {}, "output": {}, "metadata": metadata or {}}
+            span: dict[str, Any] = {
+                "name": name,
+                "input": input or {},
+                "output": {},
+                "metadata": metadata or {},
+            }
             self._active_spans.append(span)
             try:
                 yield span
@@ -120,7 +125,7 @@ class Tracer:
             raise
         finally:
             self._active_spans.pop()
-            
+
             output_val = getattr(current, "_output", {})
             if not output_val and hasattr(current, "output"):
                 output_val = current.output
@@ -160,4 +165,3 @@ class Tracer:
             unit="CHARACTERS",
             cost=cost,
         )
-

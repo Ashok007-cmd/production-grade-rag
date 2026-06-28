@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from .config import settings, PricingConfig
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class MetricsCollector:
         self._context_histogram: Any = None
         self._cost_histogram: Any = None
         self._token_histograms: dict[str, Any] = {}
-        
+
         self.latencies: list[float] = []
         self.costs: list[float] = []
         self.errors_count: int = 0
@@ -43,17 +43,19 @@ class MetricsCollector:
     def _init_meter(self) -> None:
         try:
             import logging
+
             logging.getLogger("opentelemetry").setLevel(logging.ERROR)
-            logging.getLogger("opentelemetry.exporter.otlp.proto.http.metric_exporter").setLevel(logging.ERROR)
+            logging.getLogger("opentelemetry.exporter.otlp.proto.http.metric_exporter").setLevel(
+                logging.ERROR
+            )
 
             from opentelemetry import metrics
-            from opentelemetry.sdk.metrics import MeterProvider
-
-            from opentelemetry.sdk.metrics.export import (
-                PeriodicExportingMetricReader,
-            )
             from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
                 OTLPMetricExporter,
+            )
+            from opentelemetry.sdk.metrics import MeterProvider
+            from opentelemetry.sdk.metrics.export import (
+                PeriodicExportingMetricReader,
             )
 
             reader = PeriodicExportingMetricReader(
@@ -67,8 +69,9 @@ class MetricsCollector:
 
             provider = MeterProvider(metric_readers=[reader])
             metrics.set_meter_provider(provider)
-            
+
             import atexit
+
             atexit.register(provider.shutdown)
 
             self._meter = metrics.get_meter(settings.otel_service_name)
@@ -167,7 +170,7 @@ class MetricsCollector:
 
     def export_summary(self, path: str | Path) -> None:
         import json
-        
+
         if not self.latencies:
             p50 = 0.0
             p95 = 0.0
@@ -176,9 +179,9 @@ class MetricsCollector:
             n = len(sorted_lats)
             p50 = sorted_lats[min(int(n * 0.50), n - 1)]
             p95 = sorted_lats[min(int(n * 0.95), n - 1)]
-            
+
         avg_cost = sum(self.costs) / len(self.costs) if self.costs else 0.0
-        
+
         summary = {
             "p50_latency": p50,
             "p95_latency": p95,
@@ -186,13 +189,13 @@ class MetricsCollector:
             "total_queries": self.queries_count,
             "errors": self.errors_count,
         }
-        
+
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         import os
+
         flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
         fd = os.open(path, flags, 0o600)
         with open(fd, "w") as f:
             json.dump(summary, f, indent=2)
         logger.info("Metrics summary exported to %s", path)
-

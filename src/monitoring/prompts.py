@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +42,7 @@ class PromptRegistry:
             hash=prompt_hash,
             prompt=prompt,
             name=name,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             metadata=metadata or {},
         )
         if name not in self._versions:
@@ -68,11 +68,9 @@ class PromptRegistry:
         if not self._persist_path:
             return
         import os
+
         self._persist_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            name: [asdict(v) for v in versions]
-            for name, versions in self._versions.items()
-        }
+        data = {name: [asdict(v) for v in versions] for name, versions in self._versions.items()}
         flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
         fd = os.open(self._persist_path, flags, 0o600)
         with open(fd, "w") as f:

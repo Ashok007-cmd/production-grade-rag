@@ -13,8 +13,9 @@ import asyncio
 import json
 import os
 import uuid
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,7 +40,7 @@ def _check_api_key(authorization: str | None = Header(None)) -> None:
         return  # Auth disabled — no key configured
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or malformed Authorization header.")
-    token = authorization[len("Bearer "):]
+    token = authorization[len("Bearer ") :]
     if token != _RAG_API_KEY:
         raise HTTPException(status_code=403, detail="Invalid API key.")
 
