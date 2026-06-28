@@ -9,18 +9,39 @@ Run locally with:
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import settings as _settings
 from src.generation.citations import CitationFormatter
 from src.pipeline import RAGPipeline
 from src.utils.i18n import _
+
+# ---------------------------------------------------------------------------
+# Optional API key authentication
+# ---------------------------------------------------------------------------
+_RAG_API_KEY = os.environ.get("RAG_API_KEY", "").strip()
+
+
+def _check_api_key(authorization: str | None = Header(None)) -> None:
+    """Dependency that enforces Bearer token auth when RAG_API_KEY is set."""
+    if not _RAG_API_KEY:
+        return  # Auth disabled — no key configured
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header.")
+    token = authorization[len("Bearer "):]
+    if token != _RAG_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API key.")
 
 
 async def setup_locale(accept_language: str | None = Header(None)):
@@ -57,8 +78,26 @@ app = FastAPI(
     title="Production RAG API",
     version="1.0.0",
     description="HTTP service layer for the Production-Grade RAG pipeline.",
-    dependencies=[Depends(setup_locale)],
+    dependencies=[Depends(setup_locale), Depends(_check_api_key)],
 )
+
+
+class _RequestIDMiddleware(BaseHTTPMiddleware):
+    """Propagate or generate a unique X-Request-ID for every request.
+
+    Enables distributed trace correlation across Langfuse, OTel, and logs.
+    The client may supply its own ID; we forward it unchanged, or generate
+    a UUID4 if absent.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        req_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = req_id
+        return response
+
+
+app.add_middleware(_RequestIDMiddleware)
 
 _cors_origins_raw = os.environ.get("RAG_CORS_ORIGINS", "*")
 _cors_origins: list[str] = (
@@ -329,3 +368,95 @@ async def query(request: QueryRequest, response: Response) -> QueryResponse:
         return QueryResponse(answer=answer, citations=citation_responses)
     finally:
         request_usage.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# Streaming endpoint — Server-Sent Events
+# ---------------------------------------------------------------------------
+
+
+@app.post("/query/stream")
+async def query_stream(request: QueryRequest) -> StreamingResponse:
+    """Answer a question and stream tokens via Server-Sent Events (SSE).
+
+    Clients should connect with ``Accept: text/event-stream``.
+
+    Each SSE event is one of:
+    - ``data: {"token": "<text>"}``   — a generated text chunk
+    - ``data: {"citations": [...]}``   — final citation list (last event before DONE)
+    - ``data: [DONE]``                 — stream complete
+
+    Example (curl)::
+
+        curl -N -X POST http://localhost:8000/query/stream \\
+             -H 'Content-Type: application/json' \\
+             -d '{"question": "What is RAG?", "use_hybrid": true}'
+    """
+    pipeline = get_pipeline()
+
+    async def _event_stream() -> AsyncGenerator[str, None]:
+        try:
+            question = request.question.strip()
+            if not question:
+                yield f"data: {json.dumps({'error': 'Question must not be empty.'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            if len(question) > RAGPipeline.MAX_QUESTION_LENGTH:
+                yield f"data: {json.dumps({'error': 'Question exceeds maximum length.'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            k = request.top_k or _settings.top_k_final
+
+            # Retrieval runs in a thread (blocking I/O to ChromaDB / BM25)
+            contexts = await asyncio.to_thread(
+                pipeline._retrieve,
+                question,
+                use_hybrid=request.use_hybrid,
+                use_reranker=request.use_reranker,
+                k=k,
+            )
+
+            if not contexts:
+                no_context_msg = (
+                    "I could not find any relevant information in the knowledge "
+                    "base to answer your question."
+                )
+                yield f"data: {json.dumps({'token': no_context_msg})}\n\n"
+                yield f"data: {json.dumps({'citations': []})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            if request.use_reranker:
+                contexts = await asyncio.to_thread(
+                    pipeline._apply_reranker, question, contexts, top_k=k
+                )
+
+            contexts = pipeline._apply_context_budget(contexts)
+
+            # Stream LLM tokens
+            async for chunk in pipeline.generator.generate_stream(question, contexts):
+                yield f"data: {json.dumps({'token': chunk})}\n\n"
+
+            # Emit citations as final structured event
+            citations = pipeline.citation_formatter.build_citations(contexts)
+            citation_dicts = CitationFormatter.to_dict(citations)
+            yield f"data: {json.dumps({'citations': citation_dicts})}\n\n"
+
+        except ValueError as exc:
+            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'error': 'Internal server error during streaming.'})}\n\n"
+            raise exc
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

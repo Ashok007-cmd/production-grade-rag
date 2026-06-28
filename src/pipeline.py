@@ -82,6 +82,8 @@ class RAGPipeline:
         # Dictionary of vector stores and hybrid retrievers, mapped by language
         self._vector_stores: dict[str, VectorStore] = {}
         self._hybrid_retrievers: dict[str, HybridRetriever] = {}
+        import threading
+        self._lock = threading.RLock()
 
         # Generation
         self.generator = Generator(
@@ -102,17 +104,18 @@ class RAGPipeline:
 
     def _get_vector_store(self, lang: str) -> VectorStore:
         """Construct and retrieve the vector store for a specific language."""
-        if lang not in self._vector_stores:
-            collection_name = f"rag_docs_{lang}"
-            self._vector_stores[lang] = VectorStore(
-                collection_name=collection_name,
-                persist_path=self.config.chroma_path,
-                embedding_model=self.config.embedding_model,
-                embedding_dim=self.config.embedding_dim,
-                chroma_host=self.config.chroma_host,
-                chroma_port=self.config.chroma_port,
-            )
-        return self._vector_stores[lang]
+        with self._lock:
+            if lang not in self._vector_stores:
+                collection_name = f"rag_docs_{lang}"
+                self._vector_stores[lang] = VectorStore(
+                    collection_name=collection_name,
+                    persist_path=self.config.chroma_path,
+                    embedding_model=self.config.embedding_model,
+                    embedding_dim=self.config.embedding_dim,
+                    chroma_host=self.config.chroma_host,
+                    chroma_port=self.config.chroma_port,
+                )
+            return self._vector_stores[lang]
 
     # ------------------------------------------------------------------
     # Ingestion
@@ -350,25 +353,27 @@ class RAGPipeline:
     # ------------------------------------------------------------------
 
     def _get_hybrid_retriever(self, lang: str = "en") -> HybridRetriever:
-        if lang not in self._hybrid_retrievers:
-            from src.retrieval.hybrid import HybridRetriever
+        with self._lock:
+            if lang not in self._hybrid_retrievers:
+                from src.retrieval.hybrid import HybridRetriever
 
-            self._hybrid_retrievers[lang] = HybridRetriever(
-                vector_store=self._get_vector_store(lang),
-                alpha=self.config.hybrid_alpha,
-                rrf_k=self.config.rrf_k,
-            )
-            self._hybrid_retrievers[lang].build_index()
-        return self._hybrid_retrievers[lang]
+                self._hybrid_retrievers[lang] = HybridRetriever(
+                    vector_store=self._get_vector_store(lang),
+                    alpha=self.config.hybrid_alpha,
+                    rrf_k=self.config.rrf_k,
+                )
+                self._hybrid_retrievers[lang].build_index()
+            return self._hybrid_retrievers[lang]
 
     def _get_reranker(self) -> CrossEncoderReranker:
-        if self._reranker is None:
-            from src.retrieval.reranker import CrossEncoderReranker
+        with self._lock:
+            if self._reranker is None:
+                from src.retrieval.reranker import CrossEncoderReranker
 
-            self._reranker = CrossEncoderReranker(
-                model_name=self.config.reranker_model,
-            )
-        return self._reranker
+                self._reranker = CrossEncoderReranker(
+                    model_name=self.config.reranker_model,
+                )
+            return self._reranker
 
     # ------------------------------------------------------------------
     # Management

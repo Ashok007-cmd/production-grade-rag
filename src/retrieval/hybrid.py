@@ -57,7 +57,10 @@ class HybridRetriever:
         all_chunks = self.vector_store.get_all_chunks()
         if not all_chunks:
             logger.warning("No chunks found to build BM25 index")
-            self._bm25 = BM25Okapi(corpus=[])
+            self._bm25 = BM25Okapi(corpus=[[""]])
+            self._corpus_ids = []
+            self._corpus_texts = []
+            self._corpus_metadatas = []
             self._save_index()
             return
 
@@ -101,6 +104,8 @@ class HybridRetriever:
         import json
 
         try:
+            import os
+
             self.persist_path.parent.mkdir(parents=True, exist_ok=True)
             state = {
                 "version": 1,
@@ -108,15 +113,36 @@ class HybridRetriever:
                 "corpus_texts": self._corpus_texts,
                 "corpus_metadatas": self._corpus_metadatas,
             }
-            with open(self.persist_path, "w", encoding="utf-8") as f:
+            # Use os.open with 0o600 so the corpus (which contains document text)
+            # is readable only by the owning process — not world-readable.
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+            fd = os.open(self.persist_path, flags, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False)
             logger.info("Saved BM25 corpus to %s", self.persist_path)
         except Exception:
             logger.exception("Failed to save BM25 corpus to %s", self.persist_path)
 
+    # Maximum size in bytes we are willing to load from disk (500 MB).
+    _MAX_INDEX_FILE_BYTES = 500 * 1024 * 1024
+
     def _load_index(self) -> bool:
         """Load BM25 corpus from disk and rebuild the index. Returns True on success."""
         if self.persist_path is None or not self.persist_path.exists():
+            return False
+
+        # Guard against unbounded memory usage from a corrupted/oversized index file.
+        try:
+            file_size = self.persist_path.stat().st_size
+        except OSError:
+            return False
+        if file_size > self._MAX_INDEX_FILE_BYTES:
+            logger.warning(
+                "BM25 index file %s is %.0f MB, exceeding the %d MB safety limit — skipping disk load",
+                self.persist_path,
+                file_size / (1024 * 1024),
+                self._MAX_INDEX_FILE_BYTES // (1024 * 1024),
+            )
             return False
 
         import json
@@ -129,7 +155,10 @@ class HybridRetriever:
             self._corpus_metadatas = state["corpus_metadatas"]
             # Rebuild BM25 from the loaded corpus (fast, no pickle risk)
             tokenized = [self._tokenize(doc) for doc in self._corpus_texts]
-            self._bm25 = BM25Okapi(corpus=tokenized)
+            if not tokenized:
+                self._bm25 = BM25Okapi(corpus=[[""]])
+            else:
+                self._bm25 = BM25Okapi(corpus=tokenized)
             self._stale = False
             logger.info(
                 "Loaded BM25 corpus from %s and rebuilt index (%d docs)",
@@ -251,5 +280,12 @@ class HybridRetriever:
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
-        """Basic tokenisation: lowercase, split on non-alphanumeric."""
-        return text.lower().split()
+        """Lowercase and split on non-alphanumeric boundaries, preserving Unicode letters.
+
+        Handles hyphenated terms (e.g. "GPT-4" → ["gpt", "4"]), punctuation-adjacent
+        words, and multilingual Latin-extended characters used in de/es/fr text.
+        Empty tokens are filtered out.
+        """
+        import re
+
+        return [t for t in re.split(r"[^a-zA-Z0-9À-ɏ]+", text.lower()) if t]

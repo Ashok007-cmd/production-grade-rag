@@ -98,6 +98,77 @@ class Generator:
             max_tokens=self.max_tokens,
         )
 
+    async def generate_stream(
+        self,
+        query: str,
+        contexts: list[dict[str, Any]],
+        system_prompt: str | None = None,
+    ):
+        """Stream answer tokens using the provider's streaming API.
+
+        Yields string chunks as they arrive from the LLM. The caller is
+        responsible for assembling the full answer from yielded chunks.
+
+        Args:
+            query: The user's question.
+            contexts: Retrieved chunks (each must have "document" key).
+            system_prompt: Optional override for the default system prompt.
+
+        Yields:
+            str: Token / text chunks from the LLM stream.
+        """
+        formatted_context = self._format_context(contexts)
+        system = (system_prompt or _(DEFAULT_SYSTEM_PROMPT)).format(context=formatted_context)
+
+        if self.provider == "openai":
+            async for chunk in self._stream_openai(query, system):
+                yield chunk
+        elif self.provider == "anthropic":
+            async for chunk in self._stream_anthropic(query, system):
+                yield chunk
+        else:
+            raise ValueError(f"Streaming not supported for provider: {self.provider}")
+
+    async def _stream_openai(self, prompt: str, system: str):
+        """Stream tokens from OpenAI chat completions API."""
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("openai package required. Install with: pip install openai") from None
+
+        client = AsyncOpenAI(timeout=self._client.timeout)
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+        async with await client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            stream=True,
+        ) as stream:
+            async for event in stream:
+                if event.choices and event.choices[0].delta.content:
+                    yield event.choices[0].delta.content
+
+    async def _stream_anthropic(self, prompt: str, system: str):
+        """Stream tokens from Anthropic Messages API."""
+        try:
+            import anthropic
+        except ImportError:
+            raise ImportError(
+                "anthropic package required. Install with: pip install anthropic"
+            ) from None
+
+        client = anthropic.AsyncAnthropic(timeout=self._client.timeout)
+        async with client.messages.stream(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            async for text in stream.text_stream:
+                yield text
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

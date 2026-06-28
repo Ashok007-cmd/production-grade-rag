@@ -250,12 +250,18 @@ class EvaluationRunner:
         self, results: list[EvalResult], output_path: str = "eval-summary.json"
     ) -> None:
         """Export a minimal CI-friendly summary (used by GitHub Actions)."""
+        # Resolve symlinks and normalise the path before writing.
+        # This eliminates any `..` components in the supplied string and
+        # ensures the log message shows the real on-disk location.
+        resolved = Path(output_path).resolve()
+
         summary = self.summarize(results)
         summary["threshold_met"] = self._check_threshold(results)
         summary["faithfulness_threshold"] = self.faithfulness_threshold
-        with open(output_path, "w") as f:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        with resolved.open("w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
-        logger.info("CI summary exported to %s", output_path)
+        logger.info("CI summary exported to %s", resolved)
 
 
 class EvaluationFailed(Exception):
