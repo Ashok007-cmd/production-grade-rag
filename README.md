@@ -1,183 +1,66 @@
 # Production-Grade RAG Pipeline
 
-A modular, test-driven Retrieval-Augmented Generation (RAG) pipeline built in three progressive phases — from a working baseline to hybrid search, cross-encoder re-ranking, and automated evaluation quality gates.
+[![CI](https://github.com/Ashok007-cmd/production-grade-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/Ashok007-cmd/production-grade-rag/actions/workflows/ci.yml)
+[![Evaluate](https://github.com/Ashok007-cmd/production-grade-rag/actions/workflows/evaluate.yml/badge.svg)](https://github.com/Ashok007-cmd/production-grade-rag/actions/workflows/evaluate.yml)
+[![Docker](https://github.com/Ashok007-cmd/production-grade-rag/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Ashok007-cmd/production-grade-rag/actions/workflows/docker-publish.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://img.shields.io/badge/tests-124%20passing-brightgreen.svg)](#testing)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
----
-
-<div align="center">
-
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-114%20passing-brightgreen.svg?style=flat-square&logo=github-actions&logoColor=white)](#running-tests)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-orange.svg?style=flat-square)](https://github.com/astral-sh/ruff)
-[![LLM: OpenAI & Anthropic](https://img.shields.io/badge/LLM-OpenAI%20%7C%20Anthropic-orange.svg?style=flat-square)](#configuration)
-
-[Why This Project](#why-this-project) •
-[Architecture](#architecture) •
-[Phases](#phases) •
-[Getting Started](#getting-started) •
-[CLI](#cli) •
-[API](#api) •
-[Configuration](#configuration) •
-[Testing](#testing) •
-[Contributing](#contributing)
-
-</div>
-
----
-
-## Why This Project
-
-Most RAG tutorials end with a basic notebook: embed a few strings, ask an LLM a question, done. Production RAG pipelines face real challenges: **noisy document ingestion, retrieval drift, hallucinations, performance regressions,** and the need to statistically prove quality remains stable over time.
-
-This project is a blueprint for a production-ready RAG system, structured in three progressive phases:
-
-- **Phase 1 — Foundation**: Document loading, structure-aware chunking, vector embedding, and source-grounded generation with citation formatting.
-- **Phase 2 — Retrieval Optimization**: Hybrid search (BM25 sparse + dense vector) fused via Reciprocal Rank Fusion (RRF), followed by Cross-Encoder re-ranking.
-- **Phase 3 — Quality Gates**: LLM-as-Judge evaluation (faithfulness and relevance) against a golden dataset, integrated into GitHub Actions to block regressions automatically.
+A production-ready **Retrieval-Augmented Generation (RAG)** system built with FastAPI, ChromaDB, and dual LLM support (OpenAI + Anthropic). Demonstrates the full spectrum from a clean vector-search baseline to advanced hybrid retrieval, cross-encoder reranking, OpenTelemetry metrics, Langfuse tracing, and LLM-as-Judge evaluation — all wired together in a deployable, observable, and testable package.
 
 ---
 
 ## Architecture
 
-The pipeline separates each concern into independent modules coordinated by a single `RAGPipeline` orchestrator.
-
-### Ingestion and Query Flows
-
-```mermaid
-flowchart TB
-    subgraph Ingestion ["Ingestion Pipeline (Async / Idempotent)"]
-        direction LR
-        A[Documents<br/>.pdf · .md · .txt · .json] --> B[DocumentLoader]
-        B --> C[Chunker<br/>Recursive split/overlap]
-        C --> D[Embedding Model<br/>paraphrase-multilingual-MiniLM-L12-v2]
-        D --> E[(ChromaDB<br/>Vector Store)]
-        E --> F[BM25 Indexer<br/>rank-bm25]
-    end
-
-    subgraph Retrieval ["Multi-Stage Retrieval"]
-        direction TB
-        Q[User Query] --> VS[Vector Search<br/>Cosine similarity]
-        Q --> BM[Sparse Search<br/>BM25 keyword]
-        VS --> FUS[Reciprocal Rank Fusion]
-        BM --> FUS
-        FUS --> RER[Cross-Encoder Reranker<br/>BAAI/bge-reranker-large]
-        RER --> TOP[Top-K context chunks]
-    end
-
-    subgraph Generation ["Generation & Citation"]
-        direction LR
-        TOP --> GEN[Generator<br/>OpenAI or Anthropic]
-        GEN --> CIT[CitationFormatter]
-        CIT --> ANS[Grounded answer + citations]
-    end
-
-    E -.-> VS
-    F -.-> BM
+```
+Documents → [Loader → Chunker] → ChromaDB (dense)
+                                 BM25 index  (sparse)
+                                      ↓
+Query → Language detection → HybridRetriever (RRF fusion)
+                           → CrossEncoder Reranker
+                                      ↓
+                           → Generator (OpenAI / Anthropic)
+                                      ↓
+                           Answer + Citations + OTel traces
 ```
 
-### Query Sequence
+### Three Progressive Phases
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User
-    participant RAG as RAGPipeline
-    participant Vec as VectorStore (Chroma)
-    participant BM25 as HybridRetriever (BM25)
-    participant Rerank as CrossEncoderReranker
-    participant LLM as Generator (GPT / Claude)
-
-    User->>RAG: query("How do we score RAG faithfulness?", hybrid=True, reranker=True)
-    RAG->>RAG: Validate query (≤ 2000 chars), detect language
-
-    par Vector Search
-        RAG->>Vec: similarity_search(query, k=20)
-        Vec-->>RAG: candidate chunks + distances
-    and Sparse Search
-        RAG->>BM25: search(query, k=20)
-        BM25-->>RAG: BM25 candidates + scores
-    end
-
-    RAG->>RAG: Fuse rankings via RRF
-    RAG->>Rerank: rerank(query, fused_chunks, top_k=5)
-    Rerank-->>RAG: Top-5 re-ordered chunks
-    RAG->>LLM: generate(query, context_chunks)
-    LLM-->>RAG: answer text with inline citations
-    RAG->>RAG: Map citations to source metadata
-    RAG-->>User: (answer, citations[])
-```
+| Phase | What's added | Key files |
+|-------|-------------|-----------|
+| **1 — Core RAG** | Document loading, recursive chunking, ChromaDB vector store, OpenAI/Anthropic generation, citations | `src/ingestion/`, `src/retrieval/vector_store.py`, `src/generation/` |
+| **2 — Hybrid Search + Reranking** | BM25 keyword index, Reciprocal Rank Fusion (RRF), cross-encoder reranker, per-language collections | `src/retrieval/hybrid.py`, `src/retrieval/reranker.py` |
+| **3 — Evaluation + Observability** | LLM-as-Judge faithfulness scoring, golden dataset CI gate, OpenTelemetry metrics, Langfuse tracing, prompt registry | `src/evaluation/`, `src/monitoring/` |
 
 ---
 
-## Phases
+## Features
 
-```
-  ┌──────────────────────────────────────────────────────┐
-  │ Phase 1 — Foundational Pipeline                      │
-  │  · pypdf / TXT / MD / JSON loaders                   │
-  │  · SentenceTransformers (multilingual MiniLM-L12)    │
-  │  · ChromaDB local vector store                       │
-  │  · OpenAI / Anthropic generator + citations          │
-  └──────────────────────┬───────────────────────────────┘
-                         │
-                         ▼
-  ┌──────────────────────────────────────────────────────┐
-  │ Phase 2 — Retrieval Optimization                     │
-  │  · BM25 sparse search                                │
-  │  · Reciprocal Rank Fusion (RRF)                      │
-  │  · Cross-Encoder re-ranking (BAAI/bge-reranker-large)│
-  └──────────────────────┬───────────────────────────────┘
-                         │
-                         ▼
-  ┌──────────────────────────────────────────────────────┐
-  │ Phase 3 — Evaluation & CI Quality Gate               │
-  │  · Golden Q&A dataset                                │
-  │  · LLM-as-Judge: faithfulness + answer relevance     │
-  │  · GitHub Actions regression gate                    │
-  └──────────────────────────────────────────────────────┘
-```
+- **Hybrid Search** — BM25 (rank-bm25) + ChromaDB vector similarity fused with Reciprocal Rank Fusion (RRF). Alpha controls the balance; the corpus index persists to disk with 0o600 permissions and a 500 MB safety guard.
+- **Cross-Encoder Reranking** — `BAAI/bge-reranker-large` (configurable) reorders retrieved chunks for maximum relevance before generation.
+- **Multilingual Routing** — `langdetect` identifies the query language; documents are sharded into per-language ChromaDB collections (en/de/es) with language-appropriate prompts via gettext.
+- **SSE Token Streaming** — `/query/stream` endpoint delivers tokens over Server-Sent Events as they are generated; compatible with any EventSource client.
+- **Dual LLM Backend** — Switch between OpenAI and Anthropic at runtime via `RAG_LLM_PROVIDER`. Async streaming implemented for both providers.
+- **Optional API Key Auth** — Set `RAG_API_KEY` to require `Authorization: Bearer <key>` on all requests. Omit the variable to run without auth (development default).
+- **OpenTelemetry Metrics** — Latency histograms, query counters, cost tracking, and error rates exported via OTLP. Falls back gracefully when the OTel backend is absent.
+- **Langfuse Tracing** — End-to-end span capture for retrieve → rerank → generate stages with generation cost attribution. Circuit breaker prevents telemetry failures from impacting query latency.
+- **Prompt Registry** — SHA-256 hash-based change detection for prompt versioning across deployments.
+- **LLM-as-Judge Evaluation** — Faithfulness + answer-relevance scoring via `gpt-4o-mini` against a golden JSONL dataset, with CI quality gate (`--fail-on-threshold`).
+- **X-Request-ID Correlation** — Middleware echoes or generates a `X-Request-ID` header on every response for distributed trace correlation.
+- **Context Budget Management** — Configurable `max_context_chars` trims retrieved chunks to fit within the LLM context window without truncating mid-sentence.
+- **Security Hardening** — Path-traversal guards on `/ingest`, BM25 index serialized as JSON (not pickle), 0o600 file permissions on data files, `re.escape()` on pricing pattern matching to prevent ReDoS.
+- **Docker Multi-Stage Build** — `deps → model-cache → runtime` stages; non-root user, no model download at container start.
+- **124 Tests, 3 CI Workflows** — Unit + integration tests with coverage, automatic quality gate evaluation, and GHCR Docker publish on release.
 
 ---
 
-## Deep Dive
-
-### Phase 1 — Foundation
-
-**Structure-aware chunking**: The `Chunker` splits documents recursively on paragraph boundaries (`\n\s*\n`), then sentences, then characters. This prevents mid-sentence cuts while maximising semantic context per chunk (`chunk_size=800`, `chunk_overlap=150`).
-
-**Idempotent indexing**: Every chunk receives a deterministic MD5 ID derived from its document path, chunk index, and content prefix. Re-ingesting the same file overwrites existing chunks rather than duplicating them.
-
-**Language-aware routing**: Documents and queries are automatically language-detected (English, German, Spanish). Each language gets its own ChromaDB collection so multilingual corpora stay separate.
-
-**Strict source attribution**: The LLM is instructed to answer only from the injected context and append bracketed references. `CitationFormatter` maps those references back to filename, path, and retrieval score.
-
-### Phase 2 — Hybrid Search & Re-ranking
-
-**Reciprocal Rank Fusion** merges vector and BM25 rankings without requiring score calibration:
-
-$$RRF(d) = \alpha \cdot \frac{1}{k_{rrf} + r_{vec}(d)} + (1-\alpha) \cdot \frac{1}{k_{rrf} + r_{bm25}(d)}$$
-
-where $k_{rrf}=60$ smooths rank sensitivity and $\alpha=0.6$ weights the vector side by default.
-
-**Cross-Encoder re-ranking**: The bi-encoder retrieves candidates efficiently; the Cross-Encoder (`BAAI/bge-reranker-large`) then jointly encodes every query-chunk pair for high-accuracy reordering before the context window is filled.
-
-### Phase 3 — Evaluation & CI
-
-**LLM-as-Judge** evaluates two dimensions per answer:
-- **Faithfulness**: are all claims in the answer grounded by the retrieved context? (detects hallucinations)
-- **Answer Relevance**: does the answer actually address the question?
-
-**Quality gate**: the evaluation script exits with code `1` when average faithfulness falls below `RAG_FAITHFULNESS_THRESHOLD` (default `0.7`), blocking the GitHub Actions build and posting a summary table on the pull request.
-
----
-
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 
-- Python 3.11 or 3.12
-- An OpenAI API key (or Anthropic API key)
+- Python 3.11+
+- An OpenAI API key (or Anthropic key if using `RAG_LLM_PROVIDER=anthropic`)
 
 ### Installation
 
@@ -185,220 +68,351 @@ where $k_{rrf}=60$ smooths rank sensitivity and $\alpha=0.6$ weights the vector 
 git clone https://github.com/Ashok007-cmd/production-grade-rag.git
 cd production-grade-rag
 
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
+pip install -e .
+```
 
+### Configure
+
+```bash
 cp .env.example .env
-# Edit .env and fill in your API keys
+# Edit .env — at minimum set OPENAI_API_KEY
+```
+
+### Ingest Documents
+
+```bash
+# Local CLI (no server needed):
+python scripts/ingest.py --source data/sample_docs
+
+# With a running API server the CLI auto-routes to it:
+python scripts/ingest.py --source path/to/your/docs --reset
+```
+
+### Query
+
+```bash
+# Basic vector search:
+python scripts/query.py --question "What is Retrieval-Augmented Generation?"
+
+# Phase 2 — hybrid + reranker:
+python scripts/query.py --question "How does RRF scoring work?" --hybrid --reranker
+
+# Stream tokens over SSE (requires running server):
+curl -N -X POST http://localhost:8000/query/stream \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Explain hybrid search"}'
+```
+
+### Run the API Server
+
+```bash
+uvicorn src.api.app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ---
 
-## CLI
+## API Reference
 
-All scripts must be run as modules from the project root so `src` resolves correctly.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/healthz` | Liveness probe — returns `{"status": "ok"}` |
+| `GET` | `/readyz` | Readiness probe — warms embedding model |
+| `GET` | `/stats` | Pipeline statistics (chunks, model, config) |
+| `POST` | `/ingest` | Ingest documents from a server-accessible path |
+| `POST` | `/query` | Synchronous Q&A — returns answer + citations |
+| `POST` | `/query/stream` | **SSE streaming** — streams tokens then citations |
 
-### Ingest documents
+### POST /query
 
-```bash
-python -m scripts.ingest --source data/sample_docs --reset
+```json
+{
+  "question": "What is hybrid search?",
+  "top_k": 5,
+  "use_hybrid": true,
+  "use_reranker": true
+}
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--source` | Path to a file or directory |
-| `--reset` | Clear the collection before ingesting |
-
-### Query the pipeline
-
-```bash
-python -m scripts.query --question "What is hybrid search?" --hybrid --reranker
+Response:
+```json
+{
+  "answer": "Hybrid search combines...",
+  "citations": [
+    {"chunk_id": "abc123", "source": "doc.pdf", "filename": "doc.pdf",
+     "text_snippet": "...", "score": 0.842}
+  ]
+}
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-q / --question` | Your query |
-| `--hybrid` | Enable BM25 + vector hybrid search |
-| `--reranker` | Apply Cross-Encoder re-ranking |
-| `--provider` | LLM override: `openai` or `anthropic` |
+### POST /query/stream
 
-**Example output:**
+Same request body as `/query`. Response is a stream of Server-Sent Events:
 
 ```
-============================================================
-ANSWER
-============================================================
-Hybrid search fuses dense semantic vectors and sparse lexical search (BM25)
-using Reciprocal Rank Fusion (RRF) [1]. This ensures the system catches both
-conceptual synonyms and exact keywords [1][2]. The fused list is then re-ranked
-by a Cross-Encoder to maximise precision [2].
-
-============================================================
-SOURCES
-============================================================
-[1] hybrid_search.txt (score: 0.0322)
-    Source: data/sample_docs/hybrid_search.txt
-
-[2] reranker.txt (score: 0.7842)
-    Source: data/sample_docs/reranker.txt
-============================================================
+data: {"token": "Hybrid"}
+data: {"token": " search"}
+...
+data: {"citations": [...]}
+data: [DONE]
 ```
 
-### Evaluate
+### Request Headers
 
-```bash
-# Create sample golden dataset (first run only)
-python -m scripts.evaluate --create-sample-dataset
-
-# Run with quality gate
-python -m scripts.evaluate --hybrid --reranker --fail-on-threshold
-```
-
-| Flag | Description |
-|------|-------------|
-| `--fail-on-threshold` | Exit 1 if faithfulness falls below threshold |
-| `--threshold` | Override the faithfulness threshold (e.g. `0.75`) |
-| `--export-ci-summary` | Write `eval-summary.json` for CI consumption |
-
----
-
-## API
-
-Run as a long-lived FastAPI service to keep embedding models warm:
-
-```bash
-uvicorn src.api.app:app --reload
-```
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/healthz` | Liveness check (no model loading) |
-| GET | `/readyz` | Readiness probe — warms up all models |
-| GET | `/stats` | Pipeline statistics |
-| POST | `/ingest` | Ingest documents from a path inside `data/` |
-| POST | `/query` | Answer a question with citations |
-
-```bash
-# Liveness
-curl http://localhost:8000/healthz
-
-# Ingest (path must be within the configured data directory)
-curl -X POST http://localhost:8000/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"source": "data/sample_docs", "reset": false}'
-
-# Query
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What is RAG?", "use_hybrid": true, "use_reranker": true}'
-```
-
-Interactive docs: `http://localhost:8000/docs`
-
-### Docker Compose
-
-```bash
-# Copy and configure env
-cp .env.example .env
-# Edit .env with your keys
-
-docker compose up --build
-```
-
-The Compose stack starts ChromaDB on port `8001` and the API on port `8000`.
+| Header | Description |
+|--------|-------------|
+| `Authorization: Bearer <key>` | Required when `RAG_API_KEY` is set |
+| `X-Request-ID` | Optional correlation ID; echoed in response (generated if absent) |
 
 ---
 
 ## Configuration
 
-All settings use the `RAG_` prefix and can be set in `.env` or as environment variables.
+All settings use the `RAG_` prefix and can be set via `.env` or environment variables.
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `RAG_LLM_PROVIDER` | str | `openai` | `openai` or `anthropic` |
-| `RAG_LLM_MODEL` | str | `gpt-4o-mini` | Generation model name |
-| `RAG_DATA_DIR` | str | `data` | Base directory for documents and datasets |
-| `RAG_CHROMA_PATH` | str | `data/chroma_db` | ChromaDB persistence directory |
-| `RAG_CHROMA_HOST` | str | `None` | Remote ChromaDB host |
-| `RAG_CHROMA_PORT` | int | `None` | Remote ChromaDB port |
-| `RAG_EMBEDDING_MODEL` | str | `paraphrase-multilingual-MiniLM-L12-v2` | SentenceTransformers embedding model |
-| `RAG_CHUNK_SIZE` | int | `800` | Target characters per chunk |
-| `RAG_CHUNK_OVERLAP` | int | `150` | Overlap characters between chunks |
-| `RAG_TOP_K_RETRIEVAL` | int | `20` | Stage-1 candidate count |
-| `RAG_TOP_K_FINAL` | int | `5` | Final chunks sent to the LLM |
-| `RAG_HYBRID_ALPHA` | float | `0.6` | Vector weight in RRF (1.0 = pure vector) |
-| `RAG_RRF_K` | int | `60` | RRF smoothing constant |
-| `RAG_RERANKER_MODEL` | str | `BAAI/bge-reranker-large` | Cross-Encoder model |
-| `RAG_FAITHFULNESS_THRESHOLD` | float | `0.7` | Minimum acceptable faithfulness score |
-| `RAG_LOG_LEVEL` | str | `INFO` | Logging level |
-| `RAG_CORS_ORIGINS` | str | `*` | Comma-separated allowed CORS origins (use specific domains in production) |
+### Core Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RAG_LLM_PROVIDER` | `openai` | LLM backend: `openai` or `anthropic` |
+| `RAG_LLM_MODEL` | `gpt-4o-mini` | Model name for the selected provider |
+| `OPENAI_API_KEY` | — | OpenAI API key |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key |
+| `RAG_DATA_DIR` | `data` | Root directory for data files |
+| `RAG_CHROMA_PATH` | `data/chroma_db` | ChromaDB persistence directory |
+| `RAG_CHUNK_SIZE` | `800` | Target chunk size in characters |
+| `RAG_CHUNK_OVERLAP` | `150` | Overlap between adjacent chunks |
+| `RAG_TOP_K_RETRIEVAL` | `20` | Candidates fetched before reranking |
+| `RAG_TOP_K_FINAL` | `5` | Final context chunks passed to the LLM |
+| `RAG_HYBRID_ALPHA` | `0.6` | RRF weight: 1.0 = pure vector, 0.0 = pure BM25 |
+| `RAG_RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder model |
+| `RAG_FAITHFULNESS_THRESHOLD` | `0.7` | Minimum faithfulness score for CI gate |
+| `RAG_CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
+| `RAG_API_KEY` | *(unset)* | Bearer token for API auth (disabled when unset) |
+| `RAG_LOG_LEVEL` | `INFO` | Logging level |
+
+### Monitoring Settings (`MONITOR_` prefix)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MONITOR_ENABLED` | `true` | Enable the monitoring subsystem |
+| `MONITOR_LANGFUSE_SECRET_KEY` | — | Langfuse secret key (`sk-lf-…`) |
+| `MONITOR_LANGFUSE_PUBLIC_KEY` | — | Langfuse public key (`pk-lf-…`) |
+| `MONITOR_LANGFUSE_HOST` | `http://localhost:3000` | Langfuse server URL |
+| `MONITOR_OTEL_SERVICE_NAME` | `rag-pipeline` | OTel service name |
+| `MONITOR_OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP receiver endpoint |
+| `MONITOR_CIRCUIT_BREAKER_THRESHOLD` | `3` | Failures before circuit opens |
+| `MONITOR_CIRCUIT_BREAKER_COOLDOWN_SECONDS` | `30.0` | Seconds before half-open retry |
+
+---
+
+## Monitoring & Observability
+
+### OpenTelemetry Metrics
+
+When `MONITOR_ENABLED=true` and an OTLP endpoint is reachable, the pipeline exports:
+
+- **`rag.query.latency`** — histogram of end-to-end query latency per pipeline step
+- **`rag.query.count`** — counter of total queries processed
+- **`rag.query.errors`** — counter of errors by step and type
+- **`rag.query.cost`** — running cost in USD per query
+
+A JSON summary (P50/P95 latency, avg cost, error count) is exported via `MetricsCollector.export_summary()` and written with 0o600 permissions.
+
+### Langfuse Tracing
+
+With Langfuse credentials set, each query creates a trace with spans for:
+
+- `retrieve` — vector/hybrid search timing
+- `rerank` — cross-encoder reranking timing
+- `generate` — LLM generation with model, token counts, and cost
+
+A circuit breaker (`MONITOR_CIRCUIT_BREAKER_THRESHOLD`) isolates Langfuse failures so a tracing outage never blocks query responses.
+
+### Using the Monitored Pipeline
+
+```python
+from src.monitoring import MetricsCollector, MonitoredRAGPipeline, Tracer
+from src.pipeline import RAGPipeline
+
+pipeline  = RAGPipeline()
+tracer    = Tracer(enabled=True)
+metrics   = MetricsCollector(enabled=True)
+monitored = MonitoredRAGPipeline(pipeline, tracer=tracer, metrics=metrics)
+
+answer, citations = monitored.query("What is RAG?", use_hybrid=True)
+metrics.export_summary("monitoring-summary.json")
+```
+
+### Prompt Registry
+
+```python
+from src.monitoring.prompts import PromptRegistry
+
+registry    = PromptRegistry()
+prompt_hash = registry.register("system_v1", "You are a helpful assistant…")
+changed     = registry.detect_change("system_v1", new_prompt_text)
+```
+
+---
+
+## Docker
+
+### Build
+
+```bash
+docker build -t production-rag:latest .
+```
+
+### Run
+
+```bash
+docker run -p 8000:8000 \
+  -e OPENAI_API_KEY=sk-... \
+  -e RAG_LLM_PROVIDER=openai \
+  -v $(pwd)/data:/app/data \
+  production-rag:latest
+```
+
+The image is published to GitHub Container Registry on every tagged release:
+
+```bash
+docker pull ghcr.io/ashok007-cmd/production-rag:latest
+```
+
+---
+
+## Evaluation
+
+The evaluation suite uses **LLM-as-Judge** scoring to measure faithfulness and answer relevance against a golden dataset.
+
+```bash
+# Create a sample golden dataset:
+python scripts/evaluate.py --create-sample-dataset
+
+# Run evaluation (Phase 2 features + CI exit code):
+python scripts/evaluate.py --hybrid --reranker --fail-on-threshold --export-ci-summary
+```
+
+The `evaluate.yml` GitHub Actions workflow runs this gate on every push to `main` and posts results as a PR comment.
 
 ---
 
 ## Testing
 
-### Running Tests
-
 ```bash
-# Full suite
+# Full suite (124 tests):
 python -m pytest tests/ -v
 
-# With coverage
+# With coverage report:
 python -m pytest tests/ --cov=src --cov-report=term-missing
+
+# Single module:
+python -m pytest tests/test_monitoring.py -v
 ```
 
-The suite contains **114 passing unit and integration tests** covering ingestion, retrieval, generation, evaluation, and the API. Tests run without live API calls — LLM responses and embeddings are mocked.
+### Test Coverage
 
-### CI/CD Workflows
+| Module | Coverage focus |
+|--------|---------------|
+| `test_pipeline.py` | End-to-end query/ingest flows |
+| `test_retrieval.py` | Vector store, hybrid retriever, RRF scoring |
+| `test_generation.py` | Generator, streaming, citation formatting |
+| `test_evaluation.py` | LLM-as-Judge scorer, golden dataset, CI summary |
+| `test_monitoring.py` | Tracer spans, MetricsCollector, circuit breaker, guardrails |
+| `test_api.py` | FastAPI endpoints, auth, SSE streaming |
+| `test_chunker.py` | Recursive/fixed/sentence chunking strategies |
 
-Two workflows run automatically (see `.github/workflows/`):
+---
 
-**`ci.yml`** — runs on every push and pull request to `main`:
-- Lint with ruff
-- Type-check with mypy
-- Full test suite on Python 3.11 and 3.12
-- Coverage report
+## Project Structure
 
-**`evaluate.yml`** — runs on pushes to `main` and manually:
-- Ingests sample documents
-- Runs the evaluation against the golden dataset
-- Enforces the faithfulness quality gate
-- Posts a score summary table on pull requests
-
-### Security Policy for Evaluation Workflows
-
-The evaluation gate calls the LLM API using secrets (`OPENAI_API_KEY`). GitHub automatically blocks secrets from workflows triggered by pull requests from forks.
-
-- **Do not change the trigger to `pull_request_target`** — that executes with write access and secrets visible, enabling repository takeover via malicious PR code.
-- **Approval gating**: configure your repository to require approval for first-time contributors before runs execute.
-
-```mermaid
-flowchart LR
-    push[Push or PR to main] --> CI[ci.yml: Unit Tests]
-    push --> EV[evaluate.yml: Quality Gate]
-    EV --> Ingest[Ingest sample docs]
-    Ingest --> Run[Run evaluation runner]
-    Run --> Score[Compute faithfulness + relevance]
-    Score --> Gate{Faithfulness >= threshold?}
-    Gate -->|Yes| Pass[Build passes]
-    Gate -->|No| Fail[Build fails / PR blocked]
+```
+production-grade-rag/
+├── src/
+│   ├── api/
+│   │   └── app.py              # FastAPI app, auth, SSE streaming, middleware
+│   ├── ingestion/
+│   │   ├── loader.py           # PDF, TXT, Markdown document loading
+│   │   └── chunker.py          # Recursive / fixed / sentence chunking
+│   ├── retrieval/
+│   │   ├── vector_store.py     # ChromaDB wrapper with embedding
+│   │   ├── hybrid.py           # BM25 + RRF hybrid retriever
+│   │   └── reranker.py         # Cross-encoder reranker
+│   ├── generation/
+│   │   ├── generator.py        # OpenAI / Anthropic generation + streaming
+│   │   └── citations.py        # Citation building and formatting
+│   ├── evaluation/
+│   │   ├── runner.py           # LLM-as-Judge evaluation runner
+│   │   ├── scorer.py           # Faithfulness + relevance scorers
+│   │   └── dataset.py          # Golden JSONL dataset management
+│   ├── monitoring/
+│   │   ├── config.py           # MonitoringSettings (MONITOR_* env vars)
+│   │   ├── metrics.py          # OTel MetricsCollector
+│   │   ├── tracing.py          # Langfuse Tracer with thread-local spans
+│   │   ├── extensions.py       # CircuitBreaker, GuardrailExtension, OTelMetricsExtension
+│   │   ├── prompts.py          # SHA-256 prompt registry
+│   │   └── wrappers.py         # MonitoredRAGPipeline instrumentation wrapper
+│   ├── pipeline.py             # RAGPipeline orchestration + async support
+│   ├── config.py               # RAGSettings (RAG_* env vars, pydantic-settings)
+│   └── utils/
+│       └── i18n.py             # gettext internationalization helpers
+├── tests/                      # 124 pytest tests
+├── scripts/
+│   ├── ingest.py               # CLI document ingestion
+│   ├── query.py                # CLI query (auto-routes to API if running)
+│   └── evaluate.py             # CLI evaluation runner
+├── data/
+│   └── sample_docs/            # Sample documents for quick-start
+├── .github/workflows/
+│   ├── ci.yml                  # Lint, type-check, test (Python 3.11 + 3.12)
+│   ├── evaluate.yml            # RAG faithfulness quality gate
+│   └── docker-publish.yml      # GHCR publish on release / main push
+├── Dockerfile                  # Multi-stage: deps → model-cache → runtime
+├── .env.example                # Template for all required env vars
+├── requirements.txt            # Runtime dependencies
+├── requirements-dev.txt        # Dev/test dependencies
+└── setup.py                    # Package setup
 ```
 
 ---
 
-## Contributing
+## Security
 
-1. Fork the repository and create a feature branch.
-2. Add tests for any new behaviour.
-3. Ensure the suite passes locally: `python -m pytest tests/`.
-4. Open a pull request with a clear description.
+- **API authentication** — `RAG_API_KEY` enables Bearer token auth on all endpoints.
+- **Path traversal protection** — `/ingest` resolves and validates the source path before file access.
+- **No pickle** — BM25 corpus persists as JSON; no `pickle.load()` anywhere in the codebase.
+- **File permissions** — Sensitive data files (BM25 index, metrics export) are written with `os.open(..., 0o600)`.
+- **ReDoS prevention** — Pricing key patterns use `re.escape()` before regex compilation.
+- **OOM guard** — BM25 index loader rejects files exceeding 500 MB.
+- **Secret hygiene** — No partial key logging; keys validated structurally, not compared in logs.
+- **CORS** — `RAG_CORS_ORIGINS` restricts cross-origin access; defaults to `*` for local development only.
 
-Ideas for contributions: new `DocumentLoader` types (`.docx`, `.html`), chunking strategies, additional evaluation metrics, or observability improvements.
+To report a security vulnerability, please open a private advisory via GitHub Security.
+
+---
+
+## Skills Demonstrated
+
+This project showcases production AI/ML engineering across the full stack:
+
+| Area | Demonstrated by |
+|------|----------------|
+| **LLM integration** | Dual-provider (OpenAI + Anthropic), async streaming, token tracking |
+| **Information retrieval** | BM25, dense vector search, RRF fusion, cross-encoder reranking |
+| **API design** | FastAPI, SSE streaming, auth middleware, readiness probes |
+| **Observability** | OpenTelemetry metrics, Langfuse distributed tracing, circuit breaker |
+| **LLM evaluation** | LLM-as-Judge, faithfulness + relevance metrics, golden dataset CI gate |
+| **Security engineering** | Auth, path traversal defense, safe file I/O, no pickle |
+| **Testing** | 124 tests, async patterns, mocking strategy, coverage reporting |
+| **DevOps / MLOps** | Docker multi-stage build, GitHub Actions CI/CD, GHCR publish |
+| **Multilingual NLP** | Language detection, per-language vector collections, i18n prompts |
 
 ---
 
 ## License
 
-[MIT](LICENSE)
+MIT License — see [LICENSE](LICENSE) for details.
