@@ -77,6 +77,7 @@ class PromptRegistry:
             json.dump(data, f, indent=2)
 
     def _load(self) -> None:
+        assert self._persist_path is not None
         with open(self._persist_path) as f:
             data = json.load(f)
         for name, versions_data in data.items():

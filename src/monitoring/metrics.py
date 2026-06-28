@@ -24,7 +24,7 @@ class MetricsCollector:
     def __init__(self, enabled: bool = True, prefix: str = "rag") -> None:
         self.enabled = enabled
         self.prefix = prefix
-        self._meter = None
+        self._meter: Any = None
         self._latency_histograms: dict[str, Any] = {}
         self._error_counters: dict[str, Any] = {}
         self._query_counter: Any = None

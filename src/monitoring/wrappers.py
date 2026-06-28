@@ -56,7 +56,7 @@ def _globally_patch_clients():
                 logger.warning("Failed to extract OpenAI token usage: %s", e)
             return res
 
-        openai.resources.chat.completions.Completions.create = patched_openai_create
+        openai.resources.chat.completions.Completions.create = patched_openai_create  # type: ignore[method-assign]
         _patched_openai_func = patched_openai_create
     except (ImportError, AttributeError):
         pass
@@ -79,7 +79,7 @@ def _globally_patch_clients():
                 logger.warning("Failed to extract Anthropic token usage: %s", e)
             return res
 
-        anthropic.resources.messages.Messages.create = patched_anthropic_create
+        anthropic.resources.messages.Messages.create = patched_anthropic_create  # type: ignore[method-assign]
         _patched_anthropic_func = patched_anthropic_create
     except (ImportError, AttributeError):
         pass
@@ -134,7 +134,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                     _original_openai_create = current_openai
 
                     def temp_openai_create(self_obj, *args, **kwargs):
-                        res = _original_openai_create(self_obj, *args, **kwargs)
+                        res = _original_openai_create(self_obj, *args, **kwargs)  # type: ignore[misc]
                         try:
                             u_dict = active_usage_var.get()
                             if (
@@ -151,7 +151,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                             )
                         return res
 
-                    openai.resources.chat.completions.Completions.create = temp_openai_create
+                    openai.resources.chat.completions.Completions.create = temp_openai_create  # type: ignore[method-assign]
             except (ImportError, AttributeError):
                 pass
 
@@ -165,7 +165,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                     _original_anthropic_create = current_anthropic
 
                     def temp_anthropic_create(self_obj, *args, **kwargs):
-                        res = _original_anthropic_create(self_obj, *args, **kwargs)
+                        res = _original_anthropic_create(self_obj, *args, **kwargs)  # type: ignore[misc]
                         try:
                             u_dict = active_usage_var.get()
                             if (
@@ -184,7 +184,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                             )
                         return res
 
-                    anthropic.resources.messages.Messages.create = temp_anthropic_create
+                    anthropic.resources.messages.Messages.create = temp_anthropic_create  # type: ignore[method-assign]
             except (ImportError, AttributeError):
                 pass
 
@@ -201,7 +201,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                     try:
                         import openai
 
-                        openai.resources.chat.completions.Completions.create = (
+                        openai.resources.chat.completions.Completions.create = (  # type: ignore[method-assign]
                             _original_openai_create
                         )
                     except (ImportError, AttributeError):
@@ -212,7 +212,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                     try:
                         import anthropic
 
-                        anthropic.resources.messages.Messages.create = _original_anthropic_create
+                        anthropic.resources.messages.Messages.create = _original_anthropic_create  # type: ignore[method-assign]
                     except (ImportError, AttributeError):
                         pass
                     _original_anthropic_create = None
@@ -314,7 +314,7 @@ class MonitoredRAGPipeline:
             import inspect
 
             sig = inspect.signature(original_retrieve)
-            kwargs = {}
+            kwargs: dict[str, Any] = {}
             if "use_hybrid" in sig.parameters or any(
                 p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
             ):
@@ -653,8 +653,8 @@ class MonitoredRAGPipeline:
             elif prov == "anthropic":
                 from anthropic import Anthropic
 
-                client = Anthropic(timeout=60.0)
-                with client.messages.stream(
+                anthropic_client = Anthropic(timeout=60.0)
+                with anthropic_client.messages.stream(
                     model=mdl,
                     max_tokens=getattr(self_gen, "max_tokens", 1024),
                     temperature=getattr(self_gen, "temperature", 0.0),

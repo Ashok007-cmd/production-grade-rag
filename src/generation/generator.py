@@ -137,17 +137,20 @@ class Generator:
             raise ImportError("openai package required. Install with: pip install openai") from None
 
         client = AsyncOpenAI(timeout=self._client.timeout)
-        messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
-        async with await client.chat.completions.create(
+        messages: list[Any] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
+        stream = await client.chat.completions.create(
             model=self.model,
             messages=messages,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             stream=True,
-        ) as stream:
-            async for event in stream:
-                if event.choices and event.choices[0].delta.content:
-                    yield event.choices[0].delta.content
+        )
+        async for event in stream:  # type: ignore[union-attr]
+            if event.choices and event.choices[0].delta.content:
+                yield event.choices[0].delta.content
 
     async def _stream_anthropic(self, prompt: str, system: str):
         """Stream tokens from Anthropic Messages API."""
