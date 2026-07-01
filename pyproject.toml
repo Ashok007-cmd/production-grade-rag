@@ -23,7 +23,11 @@ known-first-party = ["src"]
 quote-style = "double"
 
 [tool.mypy]
-python_version = "3.11"
+# Kept in sync with the newer of the two CI matrix versions (3.11, 3.12):
+# numpy's bundled .pyi stubs use PEP 695 `type` statements that mypy can
+# only parse when python_version >= 3.12, or stub loading hard-fails
+# before our own source is ever checked.
+python_version = "3.12"
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true

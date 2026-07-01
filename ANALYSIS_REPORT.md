@@ -360,5 +360,28 @@ The project remains in the top tier of public RAG portfolios (Round 1 assessment
 | Portfolio Value | 9.5/10 | 9.7/10 | Deployment-security finding adds a differentiating narrative |
 
 ---
+---
 
-*Round 2 analysis performed via parallel automated audits (full-codebase pentest sweep, `pip-audit`-verified dependency scan) plus direct code review for architecture/improvement depth. All fixes above are applied in the working tree as of this report.*
+# Round 3 — Full Functional Verification (venv rebuild, live smoke test)
+
+**Date:** 2026-07-02
+
+Per the request to "run the complete project development with all files fully functional," the project's `.venv` (which had no `pip`/packages installed — a stale shell) was rebuilt from scratch, all dependencies installed, and the project verified end-to-end rather than just statically reviewed:
+
+- **`pytest tests/ --cov=src`** — 124 passed, 69% coverage, 0 failures.
+- **`mypy src/`** — found and fixed a real blocker: newer `numpy` (2.5.0) ships type stubs using PEP 695 `type` statement syntax, which mypy can only parse when `python_version >= 3.12`. With `pyproject.toml` pinned to `python_version = "3.11"`, mypy hard-crashed on stub loading before checking a single line of this project's own code — meaning the CI type-check job would currently be broken on a fresh dependency install. Bumped to `3.12` (matching the newer half of the CI test matrix) to fix. Also cleaned up two now-invalid `type: ignore[assignment]` mypy-error-code suppressions in `wrappers.py` that the version bump exposed as unused.
+- **`ruff check .`** — clean.
+- **Live smoke test** (not just mocked unit tests): started the actual `uvicorn` server, ingested real sample documents through `/ingest` (real embedding model, real ChromaDB), and exercised `/healthz`, `/readyz`, `/stats`, and the path-traversal guard against a live process.
+
+### Finding #14 — High: `/healthz` required auth, breaking container health checks
+
+**File:** `src/api/app.py`
+**How it was found:** Live testing — starting the real server with `RAG_API_KEY` set and curling `/healthz` returned `401`, contradicting the README's own documented contract ("all endpoints except `/healthz` require auth") and the existing unit test suite's assumptions. This is exactly the class of bug static analysis and mocked tests miss but a live run catches immediately.
+**Impact:** `_check_api_key` was wired as an **app-wide** dependency (`FastAPI(dependencies=[...])`), which applies to every route with no exemption — including `/healthz`. `docker-compose.yml`'s and the `Dockerfile`'s own healthchecks call `/healthz` with no `Authorization` header. Any deployment that enables `RAG_API_KEY` (the exact hardening step this project's own README recommends) would make Docker/Kubernetes mark the container unhealthy immediately after start and restart it in a loop — a self-inflicted denial of service triggered by following the project's own security guidance.
+**Fix applied:** Moved `_check_api_key` off the global `FastAPI(dependencies=...)` list and onto a per-route `dependencies=[_auth]` list on every route except `/healthz` (`/readyz`, `/stats`, `/ingest`, `/query`, `/query/stream`). Verified live: `/healthz` now returns 200 with no header while every other endpoint correctly returns 401/403/200 based on the bearer token.
+
+This finding underscores why "run it, don't just read it" mattered here — none of the prior two rounds' static analysis (including the full pentest sweep) surfaced this, because the auth dependency *looked* correctly scoped by exclusion at the code-reading level; only exercising the live app against its own documented contract revealed the mismatch.
+
+---
+
+*Round 2 analysis performed via parallel automated audits (full-codebase pentest sweep, `pip-audit`-verified dependency scan) plus direct code review for architecture/improvement depth. Round 3 performed via full dependency install and live server smoke testing. All fixes above are applied in the working tree as of this report.*

@@ -201,7 +201,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                     try:
                         import openai
 
-                        openai.resources.chat.completions.Completions.create = (  # type: ignore[method-assign, assignment]
+                        openai.resources.chat.completions.Completions.create = (  # type: ignore[method-assign]
                             _original_openai_create
                         )
                     except (ImportError, AttributeError):
@@ -212,7 +212,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                     try:
                         import anthropic
 
-                        anthropic.resources.messages.Messages.create = _original_anthropic_create  # type: ignore[method-assign, assignment]
+                        anthropic.resources.messages.Messages.create = _original_anthropic_create  # type: ignore[method-assign]
                     except (ImportError, AttributeError):
                         pass
                     _original_anthropic_create = None

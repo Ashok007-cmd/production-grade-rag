@@ -86,8 +86,13 @@ app = FastAPI(
     title="Production RAG API",
     version="1.0.0",
     description="HTTP service layer for the Production-Grade RAG pipeline.",
-    dependencies=[Depends(setup_locale), Depends(_check_api_key)],
+    dependencies=[Depends(setup_locale)],
 )
+
+# Applied per-route (not app-wide) so /healthz stays reachable without a
+# key — required for Docker/Kubernetes liveness probes, which never send
+# an Authorization header.
+_auth = Depends(_check_api_key)
 
 
 class _RequestIDMiddleware(BaseHTTPMiddleware):
@@ -261,7 +266,7 @@ def healthz() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-@app.get("/readyz", response_model=HealthResponse)
+@app.get("/readyz", response_model=HealthResponse, dependencies=[_auth])
 def readyz() -> HealthResponse:
     """Readiness probe checking database access and eager-loading models."""
     try:
@@ -285,14 +290,14 @@ def readyz() -> HealthResponse:
         ) from exc
 
 
-@app.get("/stats", response_model=StatsResponse)
+@app.get("/stats", response_model=StatsResponse, dependencies=[_auth])
 def stats() -> dict[str, Any]:
     """Return pipeline statistics, constructing the pipeline if needed."""
     pipeline = get_pipeline()
     return pipeline.stats()
 
 
-@app.post("/ingest", response_model=IngestResponse)
+@app.post("/ingest", response_model=IngestResponse, dependencies=[_auth])
 async def ingest(request: IngestRequest) -> IngestResponse:
     """Ingest documents from a file or directory into the vector store."""
     import asyncio
@@ -336,7 +341,7 @@ async def ingest(request: IngestRequest) -> IngestResponse:
     return IngestResponse(chunks_ingested=chunks_ingested, total_chunks=total_chunks)
 
 
-@app.post("/query", response_model=QueryResponse)
+@app.post("/query", response_model=QueryResponse, dependencies=[_auth])
 async def query(request: QueryRequest, response: Response) -> QueryResponse:
     """Answer a question using the RAG pipeline."""
     from src.utils.usage import UsageTracker, request_usage
@@ -384,7 +389,7 @@ async def query(request: QueryRequest, response: Response) -> QueryResponse:
 # ---------------------------------------------------------------------------
 
 
-@app.post("/query/stream")
+@app.post("/query/stream", dependencies=[_auth])
 async def query_stream(request: QueryRequest) -> StreamingResponse:
     """Answer a question and stream tokens via Server-Sent Events (SSE).
 
