@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import secrets
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -28,6 +30,8 @@ from src.generation.citations import CitationFormatter
 from src.pipeline import RAGPipeline
 from src.utils.i18n import _
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Optional API key authentication
 # ---------------------------------------------------------------------------
@@ -41,7 +45,10 @@ def _check_api_key(authorization: str | None = Header(None)) -> None:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or malformed Authorization header.")
     token = authorization[len("Bearer ") :]
-    if token != _RAG_API_KEY:
+    # Constant-time comparison — a naive `!=` short-circuits on the first
+    # mismatched byte, leaking a timing side-channel that lets a remote
+    # attacker recover the key byte-by-byte across many requests.
+    if not secrets.compare_digest(token, _RAG_API_KEY):
         raise HTTPException(status_code=403, detail="Invalid API key.")
 
 
@@ -271,9 +278,10 @@ def readyz() -> HealthResponse:
 
         return HealthResponse(status="ok")
     except Exception as exc:
+        logger.warning("Readiness check failed: %s", exc)
         raise HTTPException(
             status_code=503,
-            detail=f"Service not ready: {exc}",
+            detail="Service not ready.",
         ) from exc
 
 

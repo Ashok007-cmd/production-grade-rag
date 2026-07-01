@@ -285,6 +285,27 @@ docker pull ghcr.io/ashok007-cmd/production-rag:latest
 
 ---
 
+## Why Not LangChain?
+
+This project builds retrieval, fusion, reranking, and generation directly against `chromadb`, `rank-bm25`, and the OpenAI/Anthropic SDKs instead of a framework. The tradeoffs, deliberately:
+
+- **Every retrieval decision is explicit and testable.** RRF fusion (`src/retrieval/hybrid.py`) and context-budget trimming (`src/pipeline.py`) are plain functions with unit tests — not framework internals to work around when they don't fit a use case.
+- **Fewer version-compatibility surprises.** Framework abstraction layers add a dependency-resolution axis (framework version × provider SDK version × vector-store client version) that has historically been a common source of breakage in LangChain-based projects.
+- **Debuggability.** A stack trace from `pipeline.query()` points directly at ingestion, retrieval, or generation code — not through several layers of chain/agent abstraction.
+- **When a framework *would* make sense:** rapid prototyping across many retrieval strategies, or when the team needs pre-built integrations for dozens of vector stores/tools out of the box. For a single, well-understood production RAG stack, the direct approach costs a small amount of boilerplate for a large amount of control and interview-defensible design decisions.
+
+## Scaling to Production
+
+Notes on what changes as load grows, for anyone evaluating this as a production starting point:
+
+- **Horizontal scaling:** The FastAPI service is stateless aside from the lazily-constructed `RAGPipeline` singleton (`src/api/app.py`); running multiple replicas behind a load balancer works as-is. The one shared-state caveat is the in-process BM25 index cache (`HybridRetriever`) — each replica rebuilds its own copy from the persisted JSON index on first use.
+- **ChromaDB clustering:** The current setup uses a single ChromaDB instance (embedded or standalone via `docker-compose.yml`). At higher scale, Chroma's distributed mode or a managed vector DB (e.g. sharded by language collection, which this project already partitions by) is the natural next step — the per-language collection design in `src/pipeline.py` maps cleanly onto shard boundaries.
+- **Caching:** Repeated/paraphrased queries currently re-embed and re-retrieve from scratch every time. An embedding-result cache (see the improvement roadmap in `ANALYSIS_REPORT.md`) is the highest-leverage addition before adding more compute.
+- **Async ingestion:** Large ingestion jobs currently block the request for their full duration (see `ANALYSIS_REPORT.md` roadmap item D — job-ID + polling pattern) — needed before ingesting corpora large enough to risk proxy timeouts.
+- **Observability is already there:** OTel metrics + Langfuse tracing + circuit breakers mean a horizontally-scaled deployment is debuggable from day one — this is usually the last thing added to a scaling project, not the first, and it's already built in here.
+
+---
+
 ## Evaluation
 
 The evaluation suite uses **LLM-as-Judge** scoring to measure faithfulness and answer relevance against a golden dataset.
@@ -382,14 +403,17 @@ production-grade-rag/
 
 ## Security
 
-- **API authentication** — `RAG_API_KEY` enables Bearer token auth on all endpoints.
-- **Path traversal protection** — `/ingest` resolves and validates the source path before file access.
+- **API authentication** — `RAG_API_KEY` enables Bearer token auth on all endpoints, checked with a constant-time comparison (`secrets.compare_digest`) to prevent timing-based key recovery.
+- **Path traversal protection** — `/ingest` resolves symlinks and validates the source path is contained within the configured data directory before file access.
 - **No pickle** — BM25 corpus persists as JSON; no `pickle.load()` anywhere in the codebase.
 - **File permissions** — Sensitive data files (BM25 index, metrics export) are written with `os.open(..., 0o600)`.
 - **ReDoS prevention** — Pricing key patterns use `re.escape()` before regex compilation.
 - **OOM guard** — BM25 index loader rejects files exceeding 500 MB.
 - **Secret hygiene** — No partial key logging; keys validated structurally, not compared in logs.
+- **No internal error leakage** — Readiness/health failures are logged server-side; clients receive a generic status message.
 - **CORS** — `RAG_CORS_ORIGINS` restricts cross-origin access; defaults to `*` for local development only.
+- **Deployment-topology hardening** — `docker-compose.yml` does not publish ChromaDB's own REST API to the host; it's reachable only over the internal Docker network by the API service, which prevents bypassing this project's auth layer by hitting Chroma directly.
+- **Dependency scanning** — Dependencies are periodically checked with `pip-audit`; see `ANALYSIS_REPORT.md` for the full audit trail and CVE findings.
 
 To report a security vulnerability, please open a private advisory via GitHub Security.
 

@@ -56,7 +56,7 @@ def _globally_patch_clients():
                 logger.warning("Failed to extract OpenAI token usage: %s", e)
             return res
 
-        openai.resources.chat.completions.Completions.create = patched_openai_create  # type: ignore[method-assign]
+        openai.resources.chat.completions.Completions.create = patched_openai_create  # type: ignore[method-assign, assignment]
         _patched_openai_func = patched_openai_create
     except (ImportError, AttributeError):
         pass
@@ -79,7 +79,7 @@ def _globally_patch_clients():
                 logger.warning("Failed to extract Anthropic token usage: %s", e)
             return res
 
-        anthropic.resources.messages.Messages.create = patched_anthropic_create  # type: ignore[method-assign]
+        anthropic.resources.messages.Messages.create = patched_anthropic_create  # type: ignore[method-assign, assignment]
         _patched_anthropic_func = patched_anthropic_create
     except (ImportError, AttributeError):
         pass
@@ -151,7 +151,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                             )
                         return res
 
-                    openai.resources.chat.completions.Completions.create = temp_openai_create  # type: ignore[method-assign]
+                    openai.resources.chat.completions.Completions.create = temp_openai_create  # type: ignore[method-assign, assignment]
             except (ImportError, AttributeError):
                 pass
 
@@ -184,7 +184,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                             )
                         return res
 
-                    anthropic.resources.messages.Messages.create = temp_anthropic_create  # type: ignore[method-assign]
+                    anthropic.resources.messages.Messages.create = temp_anthropic_create  # type: ignore[method-assign, assignment]
             except (ImportError, AttributeError):
                 pass
 
@@ -201,7 +201,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                     try:
                         import openai
 
-                        openai.resources.chat.completions.Completions.create = (  # type: ignore[method-assign]
+                        openai.resources.chat.completions.Completions.create = (  # type: ignore[method-assign, assignment]
                             _original_openai_create
                         )
                     except (ImportError, AttributeError):
@@ -212,7 +212,7 @@ def intercept_token_usage(usage_dict: dict[str, int]):
                     try:
                         import anthropic
 
-                        anthropic.resources.messages.Messages.create = _original_anthropic_create  # type: ignore[method-assign]
+                        anthropic.resources.messages.Messages.create = _original_anthropic_create  # type: ignore[method-assign, assignment]
                     except (ImportError, AttributeError):
                         pass
                     _original_anthropic_create = None

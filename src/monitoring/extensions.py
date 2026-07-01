@@ -503,7 +503,7 @@ class OTelMetricsExtension(BaseExtension):
                             unit="s",
                         )
                     if hasattr(self, "_ttft_hist"):
-                        self._ttft_hist.record(ttft)  # type: ignore[attr-defined]
+                        self._ttft_hist.record(ttft)
                     self._cb.record_success()
                 except Exception as e:
                     logger.warning("OTel Collector connection error recording TTFT: %s", e)

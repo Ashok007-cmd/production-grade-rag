@@ -4,8 +4,14 @@ services:
     container_name: rag-chromadb
     volumes:
       - chroma_data:/chroma/chroma
-    ports:
-      - "8001:8000"
+    # No host port mapping: Chroma is reachable only over the internal
+    # Docker network (by the `api` service, via RAG_CHROMA_HOST=chroma).
+    # A published host port here would expose Chroma's unauthenticated
+    # REST API directly to the network, bypassing the API service's
+    # optional bearer-auth entirely (see chromadb PYSEC-2026-311 —
+    # pre-auth code execution via crafted collection/embedding-function
+    # requests). If external Chroma access is ever required, re-add a
+    # port mapping AND enable CHROMA_SERVER_AUTHN_PROVIDER/CREDENTIALS.
     environment:
       - ANONYMIZED_TELEMETRY=False
     restart: unless-stopped

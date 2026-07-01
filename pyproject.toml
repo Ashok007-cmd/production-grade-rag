@@ -30,6 +30,10 @@ warn_redundant_casts = true
 check_untyped_defs = true
 exclude = ["tests/", "build/"]
 
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

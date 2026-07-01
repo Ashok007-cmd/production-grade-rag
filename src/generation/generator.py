@@ -148,7 +148,7 @@ class Generator:
             max_tokens=self.max_tokens,
             stream=True,
         )
-        async for event in stream:  # type: ignore[union-attr]
+        async for event in stream:
             if event.choices and event.choices[0].delta.content:
                 yield event.choices[0].delta.content
 
