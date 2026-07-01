@@ -85,6 +85,17 @@ def test_query_after_ingest_returns_answer_and_citations(
     assert isinstance(body["citations"], list)
 
 
+def test_metrics_returns_prometheus_text_and_reflects_requests(client: TestClient) -> None:
+    client.get("/healthz")
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert "text/plain" in response.headers["content-type"]
+    body = response.text
+    assert "rag_http_requests_total" in body
+    assert "rag_http_request_duration_seconds" in body
+    assert 'path="/healthz"' in body
+
+
 def test_readyz_returns_ok(client: TestClient) -> None:
     pipeline = api_app.get_pipeline()
     with patch.object(pipeline, "_get_hybrid_retriever") as mock_hybrid:

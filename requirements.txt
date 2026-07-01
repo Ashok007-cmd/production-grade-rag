@@ -28,4 +28,5 @@ tqdm>=4.65.0                         # Progress bars
 fastapi>=0.110.0                     # HTTP API layer
 uvicorn[standard]>=0.29.0            # ASGI server
 langdetect>=1.0.9                    # Language detection for routing
+prometheus-client>=0.20.0            # /metrics scrape endpoint
 

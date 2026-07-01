@@ -212,7 +212,7 @@ Tokenizer now uses `re.split(r"[^a-zA-Z0-9À-ɏ]+", text.lower())` which:
 
 | Priority | Improvement | Effort | Career Impact |
 |---|---|---|---|
-| HIGH | Add `/metrics` Prometheus endpoint | Low | Production-grade observability story |
+| ~~HIGH~~ | ~~Add `/metrics` Prometheus endpoint~~ | ~~Low~~ | **Implemented in Round 3 — see below** |
 | HIGH | Async document ingestion with job ID (background task + polling) | Medium | Shows production async patterns |
 | HIGH | Graph RAG path (entity extraction + knowledge graph retrieval) | High | Cutting-edge, differentiating |
 | MEDIUM | Multi-tenant collection isolation (user-scoped document namespaces) | Medium | SaaS-readiness |
@@ -332,8 +332,8 @@ Framing note: this is a first-party, source-available Python project with no com
 
 Building on the Round 1 roadmap table, here are the top four items with enough design detail to implement directly rather than just as bullet points:
 
-**A. Prometheus `/metrics` endpoint (highest effort/impact ratio)**
-`src/monitoring/extensions.py` already computes latency histograms and counters for the OTel exporter — reuse the same `OTelMetricsExtension` instrumentation points and register a parallel `prometheus_client` `CollectorRegistry`, then expose it via a new `@app.get("/metrics")` route in `src/api/app.py` returning `prometheus_client.generate_latest()`. Since the OTel path already tracks TTFT, cost, and error counts per query, this is mostly wiring, not new instrumentation.
+**A. Prometheus `/metrics` endpoint — implemented in Round 3**
+Added a dedicated `prometheus_client.CollectorRegistry` in `src/api/app.py`, a `_PrometheusMiddleware` that records a `rag_http_requests_total` counter and `rag_http_request_duration_seconds` histogram (labeled by route path, method, status code) on every request, and a `GET /metrics` route returning `generate_latest()`. Verified live against a running server: real counters/histograms observed for `/healthz`, `/stats`, and `/ingest`, correctly bucketing a slow (~82s cold-start) ingestion call. Covered by a new test in `tests/test_api.py`. This is intentionally independent of the existing push-based OTel/Langfuse pipeline in `src/monitoring/` (which isn't currently wired into the FastAPI app at all — `src/api/app.py` uses a plain `RAGPipeline`, not `MonitoredRAGPipeline` — a gap worth closing in a future round if OTel-based dashboards are wanted alongside Prometheus scraping).
 
 **B. Cached embedding layer**
 `src/retrieval/vector_store.py`'s `similarity_search()` re-embeds the query text on every call. Add an LRU cache (`functools.lru_cache` or a small Redis-backed cache behind the same interface) keyed on `(embedding_model, query_text)` ahead of the embedding call. For repeated/paraphrased queries in eval runs and demos this cuts embedding latency to near-zero on cache hits — an easy, visible performance win to cite in interviews.
@@ -382,6 +382,12 @@ Per the request to "run the complete project development with all files fully fu
 
 This finding underscores why "run it, don't just read it" mattered here — none of the prior two rounds' static analysis (including the full pentest sweep) surfaced this, because the auth dependency *looked* correctly scoped by exclusion at the code-reading level; only exercising the live app against its own documented contract revealed the mismatch.
 
+## Round 3 addendum — functionality improvement delivered
+
+Beyond bug fixes, one concrete feature from the improvement roadmap (item A, Prometheus `/metrics`) was implemented end-to-end this round: real code, a passing test, and live verification against a running server — not just a design sketch. See section A above for details. `requirements.txt` gained one new pinned-minimum dependency: `prometheus-client>=0.20.0`.
+
+Final verification after this addition: **125 tests pass** (124 + 1 new), `mypy` and `ruff` both clean.
+
 ---
 
-*Round 2 analysis performed via parallel automated audits (full-codebase pentest sweep, `pip-audit`-verified dependency scan) plus direct code review for architecture/improvement depth. Round 3 performed via full dependency install and live server smoke testing. All fixes above are applied in the working tree as of this report.*
+*Round 2 analysis performed via parallel automated audits (full-codebase pentest sweep, `pip-audit`-verified dependency scan) plus direct code review for architecture/improvement depth. Round 3 performed via full dependency install, live server smoke testing, and a real feature implementation. All fixes and additions above are applied in the working tree as of this report.*

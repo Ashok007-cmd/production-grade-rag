@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import secrets
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -22,6 +23,13 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Histogram,
+    generate_latest,
+)
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -111,6 +119,51 @@ class _RequestIDMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(_RequestIDMiddleware)
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics — pull-based scrape endpoint, independent of the
+# push-based OTel/Langfuse pipeline in src/monitoring/. A dedicated
+# registry (rather than the global default) keeps this isolated and
+# import-order-safe under repeated test-suite app construction.
+# ---------------------------------------------------------------------------
+_metrics_registry = CollectorRegistry()
+_http_requests_total = Counter(
+    "rag_http_requests_total",
+    "Total HTTP requests handled, by path and status code",
+    ["path", "method", "status_code"],
+    registry=_metrics_registry,
+)
+_http_request_duration_seconds = Histogram(
+    "rag_http_request_duration_seconds",
+    "HTTP request duration in seconds, by path",
+    ["path", "method"],
+    registry=_metrics_registry,
+)
+
+
+class _PrometheusMiddleware(BaseHTTPMiddleware):
+    """Record request count and latency for every request, keyed by route.
+
+    Uses the matched route template (e.g. ``/query``) rather than the raw
+    URL so the label cardinality stays bounded regardless of query params.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        duration = time.perf_counter() - start
+
+        route = request.scope.get("route")
+        path = getattr(route, "path", request.url.path)
+
+        _http_requests_total.labels(
+            path=path, method=request.method, status_code=response.status_code
+        ).inc()
+        _http_request_duration_seconds.labels(path=path, method=request.method).observe(duration)
+        return response
+
+
+app.add_middleware(_PrometheusMiddleware)
 
 _cors_origins_raw = os.environ.get("RAG_CORS_ORIGINS", "*")
 _cors_origins: list[str] = (
@@ -295,6 +348,15 @@ def stats() -> dict[str, Any]:
     """Return pipeline statistics, constructing the pipeline if needed."""
     pipeline = get_pipeline()
     return pipeline.stats()
+
+
+@app.get("/metrics", dependencies=[_auth])
+def metrics() -> Response:
+    """Prometheus scrape endpoint: request counts and latency histograms by route."""
+    return Response(
+        content=generate_latest(_metrics_registry),
+        media_type=CONTENT_TYPE_LATEST,
+    )
 
 
 @app.post("/ingest", response_model=IngestResponse, dependencies=[_auth])

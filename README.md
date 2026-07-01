@@ -122,6 +122,7 @@ uvicorn src.api.app:app --reload --host 0.0.0.0 --port 8000
 | `GET` | `/healthz` | Liveness probe — returns `{"status": "ok"}` |
 | `GET` | `/readyz` | Readiness probe — warms embedding model |
 | `GET` | `/stats` | Pipeline statistics (chunks, model, config) |
+| `GET` | `/metrics` | Prometheus scrape endpoint — request count + latency histograms by route |
 | `POST` | `/ingest` | Ingest documents from a server-accessible path |
 | `POST` | `/query` | Synchronous Q&A — returns answer + citations |
 | `POST` | `/query/stream` | **SSE streaming** — streams tokens then citations |
