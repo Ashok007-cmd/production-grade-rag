@@ -42,6 +42,7 @@ Query → Language detection → HybridRetriever (RRF fusion)
 - **Cross-Encoder Reranking** — `BAAI/bge-reranker-large` (configurable) reorders retrieved chunks for maximum relevance before generation.
 - **Multilingual Routing** — `langdetect` identifies the query language; documents are sharded into per-language ChromaDB collections (en/de/es) with language-appropriate prompts via gettext.
 - **SSE Token Streaming** — `/query/stream` endpoint delivers tokens over Server-Sent Events as they are generated; compatible with any EventSource client.
+- **Async Ingestion** — `POST /ingest/async` enqueues ingestion as a background job and returns a `job_id` immediately (202), avoiding client/proxy timeouts on large corpora; poll `GET /ingest/jobs/{job_id}` for status. The server stays fully responsive to other requests while a job runs.
 - **Dual LLM Backend** — Switch between OpenAI and Anthropic at runtime via `RAG_LLM_PROVIDER`. Async streaming implemented for both providers.
 - **Optional API Key Auth** — Set `RAG_API_KEY` to require `Authorization: Bearer <key>` on all requests. Omit the variable to run without auth (development default).
 - **OpenTelemetry Metrics** — Latency histograms, query counters, cost tracking, and error rates exported via OTLP. Falls back gracefully when the OTel backend is absent.
@@ -124,7 +125,9 @@ uvicorn src.api.app:app --reload --host 0.0.0.0 --port 8000
 | `GET` | `/readyz` | Readiness probe — warms embedding model |
 | `GET` | `/stats` | Pipeline statistics (chunks, model, config) |
 | `GET` | `/metrics` | Prometheus scrape endpoint — request count + latency histograms by route |
-| `POST` | `/ingest` | Ingest documents from a server-accessible path |
+| `POST` | `/ingest` | Ingest documents from a server-accessible path (blocks until done) |
+| `POST` | `/ingest/async` | Enqueue ingestion as a background job; returns `job_id` immediately (202) |
+| `GET` | `/ingest/jobs/{job_id}` | Poll status of an async ingestion job |
 | `POST` | `/query` | Synchronous Q&A — returns answer + citations |
 | `POST` | `/query/stream` | **SSE streaming** — streams tokens then citations |
 

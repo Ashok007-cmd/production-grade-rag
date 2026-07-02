@@ -16,6 +16,7 @@ import os
 import secrets
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -295,6 +296,19 @@ class IngestResponse(BaseModel):
     total_chunks: int
 
 
+class IngestJobResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class IngestJobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    chunks_ingested: int | None = None
+    total_chunks: int | None = None
+    error: str | None = None
+
+
 class QueryRequest(BaseModel):
     question: str
     top_k: int | None = None
@@ -361,14 +375,15 @@ def metrics() -> Response:
     )
 
 
-@app.post("/ingest", response_model=IngestResponse, dependencies=[_auth])
-async def ingest(request: IngestRequest) -> IngestResponse:
-    """Ingest documents from a file or directory into the vector store."""
-    import asyncio
+def _resolve_ingest_source(source: str) -> Path:
+    """Validate and resolve an ingest source path, confined to the data directory.
 
-    # Resolve to an absolute path.
+    Shared by both the synchronous and async-job ingest endpoints so the
+    path-traversal guard can't drift between them. Raises HTTPException
+    (400) on any validation failure.
+    """
     try:
-        source_path = Path(request.source).resolve(strict=False)
+        source_path = Path(source).resolve(strict=False)
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid path: {exc}") from exc
 
@@ -385,11 +400,20 @@ async def ingest(request: IngestRequest) -> IngestResponse:
     if not source_path.exists():
         raise HTTPException(
             status_code=400,
-            detail=_("Source path does not exist: {source_path}").format(
-                source_path=request.source
-            ),
+            detail=_("Source path does not exist: {source_path}").format(source_path=source),
         )
 
+    return source_path
+
+
+@app.post("/ingest", response_model=IngestResponse, dependencies=[_auth])
+async def ingest(request: IngestRequest) -> IngestResponse:
+    """Ingest documents from a file or directory into the vector store.
+
+    Blocks for the full duration of ingestion. For large corpora that risk
+    client/proxy timeouts, use ``POST /ingest/async`` instead.
+    """
+    source_path = _resolve_ingest_source(request.source)
     pipeline = get_pipeline()
 
     if request.reset:
@@ -403,6 +427,72 @@ async def ingest(request: IngestRequest) -> IngestResponse:
     stats = await asyncio.to_thread(pipeline.stats)
     total_chunks = stats["chunks_in_store"]
     return IngestResponse(chunks_ingested=chunks_ingested, total_chunks=total_chunks)
+
+
+# ---------------------------------------------------------------------------
+# Async ingestion — job-ID + polling, for corpora large enough to risk a
+# client/proxy timeout on the synchronous /ingest endpoint above.
+# ---------------------------------------------------------------------------
+_INGEST_JOBS_MAX = 500
+_ingest_jobs: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_background_ingest_tasks: set[asyncio.Task[None]] = set()
+
+
+def _record_ingest_job(job_id: str, **fields: Any) -> None:
+    _ingest_jobs[job_id] = {**_ingest_jobs.get(job_id, {}), **fields}
+    _ingest_jobs.move_to_end(job_id)
+    while len(_ingest_jobs) > _INGEST_JOBS_MAX:
+        _ingest_jobs.popitem(last=False)
+
+
+async def _run_ingest_job(job_id: str, source_path: Path, reset: bool) -> None:
+    _record_ingest_job(job_id, status="running")
+    try:
+        pipeline = get_pipeline()
+        if reset:
+            await asyncio.to_thread(pipeline.reset)
+        chunks_ingested = await asyncio.to_thread(pipeline.ingest, source_path)
+        stats = await asyncio.to_thread(pipeline.stats)
+        _record_ingest_job(
+            job_id,
+            status="completed",
+            chunks_ingested=chunks_ingested,
+            total_chunks=stats["chunks_in_store"],
+        )
+    except Exception as exc:
+        logger.warning("Ingest job %s failed: %s", job_id, exc)
+        _record_ingest_job(job_id, status="failed", error=str(exc))
+
+
+@app.post(
+    "/ingest/async", response_model=IngestJobResponse, status_code=202, dependencies=[_auth]
+)
+async def ingest_async(request: IngestRequest) -> IngestJobResponse:
+    """Enqueue ingestion as a background job and return immediately.
+
+    Poll ``GET /ingest/jobs/{job_id}`` for status. Path validation happens
+    synchronously before the job is created, so a bad path still fails fast
+    with a 400 rather than surfacing as an async job failure.
+    """
+    source_path = _resolve_ingest_source(request.source)
+
+    job_id = str(uuid.uuid4())
+    _record_ingest_job(job_id, status="pending")
+
+    task = asyncio.create_task(_run_ingest_job(job_id, source_path, request.reset))
+    _background_ingest_tasks.add(task)
+    task.add_done_callback(_background_ingest_tasks.discard)
+
+    return IngestJobResponse(job_id=job_id, status="pending")
+
+
+@app.get("/ingest/jobs/{job_id}", response_model=IngestJobStatusResponse, dependencies=[_auth])
+def get_ingest_job(job_id: str) -> IngestJobStatusResponse:
+    """Return the current status of an async ingestion job."""
+    job = _ingest_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No ingest job found with that ID.")
+    return IngestJobStatusResponse(job_id=job_id, **job)
 
 
 @app.post("/query", response_model=QueryResponse, dependencies=[_auth])

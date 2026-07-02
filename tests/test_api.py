@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -83,6 +84,73 @@ def test_query_after_ingest_returns_answer_and_citations(
     assert "citations" in body
     assert body["answer"] == "This is a mock answer."
     assert isinstance(body["citations"], list)
+
+
+def _poll_ingest_job(client: TestClient, job_id: str, timeout: float = 10.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        response = client.get(f"/ingest/jobs/{job_id}")
+        assert response.status_code == 200
+        body = response.json()
+        if body["status"] in ("completed", "failed"):
+            return body
+        time.sleep(0.05)
+    raise AssertionError(f"Ingest job {job_id} did not reach a terminal state in {timeout}s")
+
+
+def test_ingest_async_returns_job_id_and_completes(sample_docs_dir: Path) -> None:
+    # A context-managed TestClient keeps one event loop/portal alive across
+    # calls, so the background asyncio.create_task ingestion job actually
+    # gets scheduled between the POST and the polling GETs below. Without
+    # `with`, each call can run on its own short-lived loop and the task
+    # never progresses — a TestClient quirk, not a real-server behavior
+    # (verified separately against a live uvicorn process).
+    with TestClient(api_app.app) as client:
+        response = client.post(
+            "/ingest/async", json={"source": str(sample_docs_dir), "reset": True}
+        )
+        assert response.status_code == 202
+        body = response.json()
+        assert body["status"] == "pending"
+        job_id = body["job_id"]
+
+        final = _poll_ingest_job(client, job_id)
+        assert final["status"] == "completed"
+        assert final["chunks_ingested"] > 0
+        assert final["total_chunks"] >= final["chunks_ingested"]
+        assert final["error"] is None
+
+
+def test_ingest_async_invalid_path_fails_fast_not_as_job(client: TestClient) -> None:
+    response = client.post("/ingest/async", json={"source": "/no/such/path", "reset": False})
+    assert response.status_code == 400
+
+
+def test_ingest_job_status_unknown_id_returns_404(client: TestClient) -> None:
+    response = client.get("/ingest/jobs/00000000-0000-0000-0000-000000000000")
+    assert response.status_code == 404
+
+
+def test_ingest_async_job_records_failure(
+    sample_docs_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pipeline = api_app.get_pipeline()
+
+    def boom(source) -> int:
+        raise ValueError("simulated ingestion failure")
+
+    monkeypatch.setattr(pipeline, "ingest", boom)
+
+    with TestClient(api_app.app) as client:
+        response = client.post(
+            "/ingest/async", json={"source": str(sample_docs_dir), "reset": False}
+        )
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+
+        final = _poll_ingest_job(client, job_id)
+        assert final["status"] == "failed"
+        assert "simulated ingestion failure" in final["error"]
 
 
 def test_metrics_returns_prometheus_text_and_reflects_requests(client: TestClient) -> None:

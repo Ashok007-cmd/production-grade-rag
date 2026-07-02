@@ -213,7 +213,7 @@ Tokenizer now uses `re.split(r"[^a-zA-Z0-9À-ɏ]+", text.lower())` which:
 | Priority | Improvement | Effort | Career Impact |
 |---|---|---|---|
 | ~~HIGH~~ | ~~Add `/metrics` Prometheus endpoint~~ | ~~Low~~ | **Implemented in Round 3 — see below** |
-| HIGH | Async document ingestion with job ID (background task + polling) | Medium | Shows production async patterns |
+| ~~HIGH~~ | ~~Async document ingestion with job ID (background task + polling)~~ | ~~Medium~~ | **Implemented in Round 5 — see below** |
 | HIGH | Graph RAG path (entity extraction + knowledge graph retrieval) | High | Cutting-edge, differentiating |
 | MEDIUM | Multi-tenant collection isolation (user-scoped document namespaces) | Medium | SaaS-readiness |
 | MEDIUM | Document version tracking (re-ingest detection, dedup by content hash) | Medium | Data integrity |
@@ -343,8 +343,10 @@ Verified live against the real embedding model and real ChromaDB `.query()` call
 **C. RAGAS-style eval dimensions (context precision/recall)**
 `src/evaluation/metrics.py` currently implements faithfulness + answer-relevance via LLM-as-judge (`FaithfulnessScorer`, `AnswerRelevanceScorer`). Adding **context precision** (are retrieved chunks actually relevant, penalizing irrelevant-but-retrieved chunks) and **context recall** (did retrieval surface everything needed, measured against the golden dataset's reference answer) would close the gap with RAGAS's standard 4-metric suite. Both can reuse the existing `_extract_json_object` parser and `LLMClient` plumbing — just two new prompt templates and scorer classes following the exact pattern already in the file.
 
-**D. Async ingestion with job polling**
-`POST /ingest` in `src/api/app.py` currently blocks the request for the full duration of ingestion via `asyncio.to_thread`. For large corpora this risks client/proxy timeouts. Add a `job_id`-returning variant: enqueue the ingestion coroutine via `asyncio.create_task`, store status in an in-memory (or Redis, for multi-worker) dict keyed by UUID, and add `GET /ingest/{job_id}` for polling. This is a well-known production pattern (same shape as most bulk-import APIs) and demonstrates async job-orchestration thinking beyond request/response.
+**D. Async ingestion with job polling — implemented in Round 5**
+Added `POST /ingest/async` (`src/api/app.py`), which validates the source path synchronously (reusing the exact same `_resolve_ingest_source()` traversal guard as `/ingest`, so the two endpoints can't drift in security posture), then enqueues ingestion via `asyncio.create_task` and returns `{"job_id", "status": "pending"}` with HTTP 202 immediately. `GET /ingest/jobs/{job_id}` polls status (`pending` → `running` → `completed`/`failed`), with `chunks_ingested`/`total_chunks`/`error` populated on completion. Job records live in a bounded in-process `OrderedDict` (LRU-evicted past 500 entries — the same pattern as the query-embedding cache in Round 4) rather than growing unbounded; a documented future step would swap this for Redis under multi-worker deployment.
+
+**Live verification against a real uvicorn process (not TestClient) was essential here** and surfaced a real finding: a naive `TestClient(app)` without a `with` block spins up a fresh event loop/portal per call, so a background task created via `asyncio.create_task` during the `POST` never gets scheduled by the time a later `GET` polls it — the job appeared to hang at `pending` forever in that test harness. Against a real server, the same code worked correctly: the job progressed `pending` → `running` → `completed` (~87s, matching the known cold-start embedding-model-load time), and **`/healthz` returned 200 on every single poll throughout** — proof the event loop was never blocked by the background ingestion, which is the entire point of this feature. The fix was in the test (wrap the async-ingestion tests in `with TestClient(app) as client:` to keep one portal alive across the poll loop), not the implementation. Four new tests cover the happy path, fast-fail on an invalid path (validation happens before job creation, so bad paths never even become a job), 404 on an unknown job ID, and a job correctly recording `status: "failed"` with the error message when ingestion raises.
 
 ## 4. Portfolio / Career Positioning — Round 2 Refresh
 
@@ -402,5 +404,20 @@ Implemented improvement roadmap item B (see section B above for full design/veri
 **Final verification: 131 tests pass** (125 + 6 new), `mypy` and `ruff` both clean, and live-verified against the real `sentence-transformers` model with a measured ~10x latency drop on a cache hit.
 
 ---
+---
 
-*Round 2 analysis performed via parallel automated audits (full-codebase pentest sweep, `pip-audit`-verified dependency scan) plus direct code review for architecture/improvement depth. Round 3 performed via full dependency install, live server smoke testing, and a real feature implementation. Round 4 added a second roadmap feature (cached embeddings) with the same real-code-plus-live-verification bar. All fixes and additions above are applied in the working tree as of this report.*
+# Round 5 — Async Ingestion with Job Polling
+
+**Date:** 2026-07-02
+
+Implemented improvement roadmap item D (see section D above for full design/verification detail): `POST /ingest/async` + `GET /ingest/jobs/{job_id}` in `src/api/app.py`, sharing the existing path-traversal guard with the synchronous `/ingest` endpoint via a new `_resolve_ingest_source()` helper. Job state lives in a 500-entry LRU-bounded `OrderedDict`.
+
+This round's live verification caught a real gap between test-harness behavior and production behavior: a bare `TestClient(app)` (no `with` block) doesn't keep one event loop alive across separate `.post()`/`.get()` calls, so a background `asyncio.create_task` job never progressed in that test setup — while the identical code worked correctly against a real running `uvicorn` process, with the added proof that `/healthz` stayed responsive (200) on every poll during the ~87s background ingestion. This is a good illustration of why this project's audits have leaned on live smoke-testing rather than static review alone — see Round 3's `/healthz`-auth finding for the same pattern.
+
+Four new tests added (`tests/test_api.py`): happy path to completion, fast-fail on an invalid path, 404 on an unknown job ID, and a job correctly recording failure state.
+
+**Final verification: 135 tests pass** (131 + 4 new), `mypy` and `ruff` both clean.
+
+---
+
+*Round 2 analysis performed via parallel automated audits (full-codebase pentest sweep, `pip-audit`-verified dependency scan) plus direct code review for architecture/improvement depth. Round 3 performed via full dependency install, live server smoke testing, and a real feature implementation. Round 4 added a second roadmap feature (cached embeddings) with the same real-code-plus-live-verification bar. Round 5 added a third roadmap feature (async ingestion), again catching a live-vs-test-harness discrepancy that static review would have missed. All fixes and additions above are applied in the working tree as of this report.*
