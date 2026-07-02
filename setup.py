@@ -4,7 +4,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="production-grade-rag",
-    version="1.0.0",
+    version="1.1.0",
     description="Production-Grade Retrieval-Augmented Generation pipeline",
     long_description=open("README.md").read() if __import__("os").path.exists("README.md") else "",
     long_description_content_type="text/markdown",

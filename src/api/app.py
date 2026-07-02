@@ -93,7 +93,7 @@ async def setup_locale(accept_language: str | None = Header(None)):
 
 app = FastAPI(
     title="Production RAG API",
-    version="1.0.0",
+    version="1.1.0",
     description="HTTP service layer for the Production-Grade RAG pipeline.",
     dependencies=[Depends(setup_locale)],
 )
