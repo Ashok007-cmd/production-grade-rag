@@ -3,30 +3,30 @@
 # =============================================================================
 
 # Configuration
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
-python-dotenv>=1.0.0
+pydantic>=2.13.4
+pydantic-settings>=2.14.2
+python-dotenv>=1.2.2
 
 # Ingestion
-pypdf>=3.0.0                         # PDF document loading
+pypdf>=6.14.2                         # PDF document loading
 
 # Vector Store & Embeddings
-chromadb>=0.4.0                      # Vector database
-sentence-transformers>=2.2.0         # Embedding models + cross-encoders
+chromadb>=1.5.9                      # Vector database
+sentence-transformers>=5.6.0         # Embedding models + cross-encoders
 
 # Hybrid Search (Phase 2)
-rank-bm25>=0.2.0                     # BM25 keyword retrieval
+rank-bm25>=0.2.2                     # BM25 keyword retrieval
 
 # Generation
-openai>=1.0.0                        # OpenAI LLM backend
-anthropic>=0.30.0                    # Anthropic LLM backend
+openai>=2.44.0                        # OpenAI LLM backend
+anthropic>=0.115.1                    # Anthropic LLM backend
 
 # Utilities
-tqdm>=4.65.0                         # Progress bars
+tqdm>=4.68.3                         # Progress bars
 
 # API service
-fastapi>=0.110.0                     # HTTP API layer
-uvicorn[standard]>=0.29.0            # ASGI server
+fastapi>=0.139.0                     # HTTP API layer
+uvicorn[standard]>=0.49.0            # ASGI server
 langdetect>=1.0.9                    # Language detection for routing
-prometheus-client>=0.20.0            # /metrics scrape endpoint
+prometheus-client>=0.25.0            # /metrics scrape endpoint
 
