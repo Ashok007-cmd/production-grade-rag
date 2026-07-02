@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: dependency installer ──────────────────────────────────────────
-FROM python:3.11-slim AS deps
+FROM python:3.14-slim AS deps
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -13,7 +13,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --prefix=/install/pkg -r requirements.txt
 
 # ── Stage 2: model cache ────────────────────────────────────────────────────
-FROM python:3.11-slim AS model-cache
+FROM python:3.14-slim AS model-cache
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -28,7 +28,7 @@ COPY setup.py ./
 RUN python scripts/cache_models.py
 
 # ── Stage 3: production runtime ─────────────────────────────────────────────
-FROM python:3.11-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
