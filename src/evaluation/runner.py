@@ -11,7 +11,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 from src.evaluation.dataset import EvalExample, GoldenDataset
-from src.evaluation.metrics import AnswerRelevanceScorer, FaithfulnessScorer
+from src.evaluation.metrics import (
+    AnswerRelevanceScorer,
+    ContextPrecisionScorer,
+    ContextRecallScorer,
+    FaithfulnessScorer,
+)
 from src.pipeline import RAGPipeline
 
 logger = logging.getLogger(__name__)
@@ -30,6 +35,8 @@ class EvalResult:
     unsupported_claims: list[str] = field(default_factory=list)
     answer_relevance_score: float = 0.0
     is_relevant: bool = False
+    context_precision_score: float = 0.0
+    context_recall_score: float = 0.0
     contexts_used: int = 0
     contexts: list[dict[str, Any]] = field(default_factory=list)
     passed: bool = False
@@ -62,6 +69,10 @@ class EvaluationRunner:
 
         self.scorer = FaithfulnessScorer(model=eval_model, provider=eval_provider)
         self.relevance_scorer = AnswerRelevanceScorer(model=eval_model, provider=eval_provider)
+        self.context_precision_scorer = ContextPrecisionScorer(
+            model=eval_model, provider=eval_provider
+        )
+        self.context_recall_scorer = ContextRecallScorer(model=eval_model, provider=eval_provider)
 
     # ------------------------------------------------------------------
     # Run evaluation
@@ -152,6 +163,14 @@ class EvaluationRunner:
         answer_relevance_score = relevance_result.get("relevance_score", 0.0)
         is_relevant = relevance_result.get("relevant", False)
 
+        # Score context precision (are retrieved chunks relevant, ranked well?)
+        precision_result = self.context_precision_scorer.score(example.question, contexts)
+        context_precision_score = precision_result.get("context_precision_score", 0.0)
+
+        # Score context recall (does retrieval cover the reference answer?)
+        recall_result = self.context_recall_scorer.score(example.reference_answer, contexts)
+        context_recall_score = recall_result.get("context_recall_score", 0.0)
+
         return EvalResult(
             example_id=example.id,
             question=example.question,
@@ -162,6 +181,8 @@ class EvaluationRunner:
             unsupported_claims=unsupported,
             answer_relevance_score=answer_relevance_score,
             is_relevant=is_relevant,
+            context_precision_score=context_precision_score,
+            context_recall_score=context_recall_score,
             contexts_used=len(citations),
             contexts=contexts,
             passed=faithfulness_score >= self.faithfulness_threshold,
@@ -197,6 +218,8 @@ class EvaluationRunner:
 
         faith_scores = [r.faithfulness_score for r in results]
         rel_scores = [r.answer_relevance_score for r in results]
+        precision_scores = [r.context_precision_score for r in results]
+        recall_scores = [r.context_recall_score for r in results]
         passed = sum(1 for r in results if r.passed)
         faithful = sum(1 for r in results if r.is_faithful)
         relevant = sum(1 for r in results if r.is_relevant)
@@ -212,6 +235,8 @@ class EvaluationRunner:
             "faithful_count": faithful,
             "avg_answer_relevance": round(sum(rel_scores) / len(rel_scores), 4),
             "relevant_count": relevant,
+            "avg_context_precision": round(sum(precision_scores) / len(precision_scores), 4),
+            "avg_context_recall": round(sum(recall_scores) / len(recall_scores), 4),
             "avg_contexts_used": round(sum(r.contexts_used for r in results) / len(results), 1),
         }
 
@@ -235,6 +260,8 @@ class EvaluationRunner:
         print(f"  Min faithfulness:    {summary['min_faithfulness']:.4f}")
         print(f"  Max faithfulness:    {summary['max_faithfulness']:.4f}")
         print(f"  Avg answer relevance:{summary['avg_answer_relevance']:.4f}")
+        print(f"  Avg context precision:{summary['avg_context_precision']:.4f}")
+        print(f"  Avg context recall: {summary['avg_context_recall']:.4f}")
         print(f"  Threshold:           {self.faithfulness_threshold}")
         print()
 
@@ -242,7 +269,8 @@ class EvaluationRunner:
             status = "PASS" if r.passed else "FAIL"
             print(f"  {i}. [{status}] Q: {r.question[:60]}...")
             print(
-                f"     Faithfulness: {r.faithfulness_score:.4f}  Relevance: {r.answer_relevance_score:.4f}"
+                f"     Faithfulness: {r.faithfulness_score:.4f}  Relevance: {r.answer_relevance_score:.4f}  "
+                f"Ctx Precision: {r.context_precision_score:.4f}  Ctx Recall: {r.context_recall_score:.4f}"
             )
             print()
 

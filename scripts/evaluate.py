@@ -95,6 +95,8 @@ def main() -> None:
                     "faithful_count": 0,
                     "avg_answer_relevance": 0.0,
                     "relevant_count": 0,
+                    "avg_context_precision": 0.0,
+                    "avg_context_recall": 0.0,
                     "avg_contexts_used": 0.0,
                     "threshold_met": True,
                     "faithfulness_threshold": args.threshold,

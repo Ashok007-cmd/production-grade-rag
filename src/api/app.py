@@ -464,9 +464,7 @@ async def _run_ingest_job(job_id: str, source_path: Path, reset: bool) -> None:
         _record_ingest_job(job_id, status="failed", error=str(exc))
 
 
-@app.post(
-    "/ingest/async", response_model=IngestJobResponse, status_code=202, dependencies=[_auth]
-)
+@app.post("/ingest/async", response_model=IngestJobResponse, status_code=202, dependencies=[_auth])
 async def ingest_async(request: IngestRequest) -> IngestJobResponse:
     """Enqueue ingestion as a background job and return immediately.
 

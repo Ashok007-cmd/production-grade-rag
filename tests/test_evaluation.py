@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from src.evaluation.dataset import EvalExample, GoldenDataset
-from src.evaluation.metrics import AnswerRelevanceScorer, FaithfulnessScorer
+from src.evaluation.metrics import (
+    AnswerRelevanceScorer,
+    ContextPrecisionScorer,
+    ContextRecallScorer,
+    FaithfulnessScorer,
+)
 from src.evaluation.runner import EvaluationFailed, EvaluationRunner
 
 
@@ -183,6 +188,140 @@ class TestAnswerRelevanceScorer:
             scorer._call_judge_llm("some prompt")
 
 
+class TestContextPrecisionScorer:
+    """Tests for the ContextPrecisionScorer (RAGAS-style Average Precision @ k)."""
+
+    def test_scorer_importable(self) -> None:
+        scorer = ContextPrecisionScorer(model="gpt-4o-mini")
+        assert scorer is not None
+        assert scorer.model == "gpt-4o-mini"
+
+    def test_no_contexts_scores_zero(self) -> None:
+        scorer = ContextPrecisionScorer()
+        result = scorer.score("What is RAG?", [])
+        assert result["context_precision_score"] == 0.0
+        assert result["verdicts"] == []
+
+    def test_all_relevant_scores_one(self) -> None:
+        from unittest.mock import patch
+
+        scorer = ContextPrecisionScorer()
+        mock_response = '{"verdicts": [true, true, true], "explanation": "All relevant."}'
+        contexts = [{"document": f"chunk {i}"} for i in range(3)]
+
+        with patch.object(scorer, "_call_judge_llm", return_value=mock_response):
+            result = scorer.score("Q?", contexts)
+            assert result["context_precision_score"] == 1.0
+            assert result["verdicts"] == [True, True, True]
+
+    def test_relevant_ranked_first_scores_higher_than_last(self) -> None:
+        """Average Precision should reward relevant chunks ranked earlier."""
+        from unittest.mock import patch
+
+        scorer = ContextPrecisionScorer()
+        contexts = [{"document": f"chunk {i}"} for i in range(3)]
+
+        relevant_first = '{"verdicts": [true, false, false], "explanation": ""}'
+        relevant_last = '{"verdicts": [false, false, true], "explanation": ""}'
+
+        with patch.object(scorer, "_call_judge_llm", return_value=relevant_first):
+            score_first = scorer.score("Q?", contexts)["context_precision_score"]
+        with patch.object(scorer, "_call_judge_llm", return_value=relevant_last):
+            score_last = scorer.score("Q?", contexts)["context_precision_score"]
+
+        assert score_first == 1.0  # only relevant chunk is at rank 1: precision@1 = 1/1
+        assert score_last == pytest.approx(1 / 3, abs=1e-4)  # precision@3 = 1/3
+        assert score_first > score_last
+
+    def test_no_relevant_chunks_scores_zero(self) -> None:
+        from unittest.mock import patch
+
+        scorer = ContextPrecisionScorer()
+        contexts = [{"document": "irrelevant"}]
+        with patch.object(
+            scorer, "_call_judge_llm", return_value='{"verdicts": [false], "explanation": ""}'
+        ):
+            result = scorer.score("Q?", contexts)
+            assert result["context_precision_score"] == 0.0
+
+    def test_malformed_judge_response_defaults_to_false_verdicts(self) -> None:
+        from unittest.mock import patch
+
+        scorer = ContextPrecisionScorer()
+        contexts = [{"document": "a"}, {"document": "b"}]
+        with patch.object(scorer, "_call_judge_llm", return_value="not json at all"):
+            result = scorer.score("Q?", contexts)
+            assert result["verdicts"] == [False, False]
+            assert result["context_precision_score"] == 0.0
+
+    def test_short_verdicts_list_is_padded_with_false(self) -> None:
+        """A judge returning fewer verdicts than chunks shouldn't crash or over-count relevance."""
+        scorer = ContextPrecisionScorer()
+        padded = scorer._normalize_verdicts({"verdicts": [True]}, expected_len=3)
+        assert padded == [True, False, False]
+
+
+class TestContextRecallScorer:
+    """Tests for the ContextRecallScorer (RAGAS-style statement attribution)."""
+
+    def test_scorer_importable(self) -> None:
+        scorer = ContextRecallScorer(model="gpt-4o-mini")
+        assert scorer is not None
+        assert scorer.model == "gpt-4o-mini"
+
+    def test_all_statements_attributed_scores_one(self) -> None:
+        from unittest.mock import patch
+
+        scorer = ContextRecallScorer()
+        mock_response = (
+            '{"statements": ['
+            '{"statement": "RAG combines retrieval and generation.", "attributed": true}, '
+            '{"statement": "It reduces hallucinations.", "attributed": true}'
+            '], "explanation": "Both covered."}'
+        )
+        contexts = [{"document": "RAG combines retrieval and generation, reducing hallucinations."}]
+
+        with patch.object(scorer, "_call_judge_llm", return_value=mock_response):
+            result = scorer.score("RAG combines retrieval and generation.", contexts)
+            assert result["context_recall_score"] == 1.0
+            assert len(result["statements"]) == 2
+
+    def test_partial_attribution_scores_fraction(self) -> None:
+        from unittest.mock import patch
+
+        scorer = ContextRecallScorer()
+        mock_response = (
+            '{"statements": ['
+            '{"statement": "Statement A.", "attributed": true}, '
+            '{"statement": "Statement B.", "attributed": false}'
+            '], "explanation": "Only A covered."}'
+        )
+
+        with patch.object(scorer, "_call_judge_llm", return_value=mock_response):
+            result = scorer.score("Statement A. Statement B.", [{"document": "context"}])
+            assert result["context_recall_score"] == 0.5
+
+    def test_no_statements_extracted_scores_zero(self) -> None:
+        from unittest.mock import patch
+
+        scorer = ContextRecallScorer()
+        with patch.object(
+            scorer, "_call_judge_llm", return_value='{"statements": [], "explanation": "empty"}'
+        ):
+            result = scorer.score("Some reference answer.", [{"document": "context"}])
+            assert result["context_recall_score"] == 0.0
+            assert result["statements"] == []
+
+    def test_malformed_judge_response_scores_zero(self) -> None:
+        from unittest.mock import patch
+
+        scorer = ContextRecallScorer()
+        with patch.object(scorer, "_call_judge_llm", return_value="not json"):
+            result = scorer.score("Reference.", [{"document": "context"}])
+            assert result["context_recall_score"] == 0.0
+            assert result["statements"] == []
+
+
 class TestEvaluationRunner:
     """Tests for the EvaluationRunner."""
 
@@ -331,6 +470,22 @@ class TestEvaluationRunner:
         }
         runner.relevance_scorer = mock_relevance_scorer
 
+        mock_precision_scorer = MagicMock()
+        mock_precision_scorer.score.return_value = {
+            "context_precision_score": 0.75,
+            "verdicts": [True],
+            "explanation": "Chunk is relevant.",
+        }
+        runner.context_precision_scorer = mock_precision_scorer
+
+        mock_recall_scorer = MagicMock()
+        mock_recall_scorer.score.return_value = {
+            "context_recall_score": 0.6,
+            "statements": [{"statement": "RAG is good.", "attributed": True}],
+            "explanation": "Statement covered.",
+        }
+        runner.context_recall_scorer = mock_recall_scorer
+
         # Override examples
         runner.dataset._examples = [
             EvalExample(question="What is RAG?", reference_answer="RAG is good.")
@@ -341,11 +496,15 @@ class TestEvaluationRunner:
         assert results[0].passed is True
         assert results[0].faithfulness_score == 0.8
         assert results[0].answer_relevance_score == 0.9
+        assert results[0].context_precision_score == 0.75
+        assert results[0].context_recall_score == 0.6
         mock_pipeline.query.assert_called_once_with(
             "What is RAG?", use_hybrid=False, use_reranker=False
         )
         mock_scorer.score.assert_called_once()
         mock_relevance_scorer.score.assert_called_once()
+        mock_precision_scorer.score.assert_called_once()
+        mock_recall_scorer.score.assert_called_once()
         # Verify the context passed to the faithfulness scorer had "Full document text"
         contexts_passed = mock_scorer.score.call_args[0][1]
         assert contexts_passed[0]["document"] == "Full document text"

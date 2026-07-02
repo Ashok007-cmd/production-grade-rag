@@ -48,7 +48,7 @@ Query → Language detection → HybridRetriever (RRF fusion)
 - **OpenTelemetry Metrics** — Latency histograms, query counters, cost tracking, and error rates exported via OTLP. Falls back gracefully when the OTel backend is absent.
 - **Langfuse Tracing** — End-to-end span capture for retrieve → rerank → generate stages with generation cost attribution. Circuit breaker prevents telemetry failures from impacting query latency.
 - **Prompt Registry** — SHA-256 hash-based change detection for prompt versioning across deployments.
-- **LLM-as-Judge Evaluation** — Faithfulness + answer-relevance scoring via `gpt-4o-mini` against a golden JSONL dataset, with CI quality gate (`--fail-on-threshold`).
+- **LLM-as-Judge Evaluation** — All four RAGAS-style quality dimensions via `gpt-4o-mini` against a golden JSONL dataset, with CI quality gate (`--fail-on-threshold`): faithfulness, answer relevance, context precision (Average Precision @ k — are retrieved chunks relevant, ranked well?), and context recall (are reference-answer statements attributable to the retrieved context?).
 - **X-Request-ID Correlation** — Middleware echoes or generates a `X-Request-ID` header on every response for distributed trace correlation.
 - **Context Budget Management** — Configurable `max_context_chars` trims retrieved chunks to fit within the LLM context window without truncating mid-sentence.
 - **Security Hardening** — Path-traversal guards on `/ingest`, BM25 index serialized as JSON (not pickle), 0o600 file permissions on data files, `re.escape()` on pricing pattern matching to prevent ReDoS.
@@ -314,7 +314,16 @@ Notes on what changes as load grows, for anyone evaluating this as a production 
 
 ## Evaluation
 
-The evaluation suite uses **LLM-as-Judge** scoring to measure faithfulness and answer relevance against a golden dataset.
+The evaluation suite uses **LLM-as-Judge** scoring across all four standard RAG quality dimensions against a golden dataset:
+
+| Dimension | What it measures | Scoring method |
+|---|---|---|
+| **Faithfulness** | Is the answer's every claim supported by the retrieved context? | LLM-judged score 0–1 |
+| **Answer Relevance** | Does the answer address the question asked? | LLM-judged score 0–1 |
+| **Context Precision** | Are retrieved chunks relevant, and are relevant chunks ranked higher? | Average Precision @ k, computed from per-chunk LLM relevance verdicts |
+| **Context Recall** | Does the retrieved context cover everything in the reference answer? | Fraction of reference-answer statements attributable to context, via LLM |
+
+Context precision/recall scores are computed deterministically from binary per-item LLM verdicts (not a self-reported LLM aggregate) — more robust to judge arithmetic mistakes, and matches the [RAGAS](https://github.com/explodinggradients/ragas) methodology this evaluation suite is modeled on.
 
 ```bash
 # Create a sample golden dataset:
@@ -324,7 +333,7 @@ python scripts/evaluate.py --create-sample-dataset
 python scripts/evaluate.py --hybrid --reranker --fail-on-threshold --export-ci-summary
 ```
 
-The `evaluate.yml` GitHub Actions workflow runs this gate on every push to `main` and posts results as a PR comment.
+The `evaluate.yml` GitHub Actions workflow runs this gate on every push to `main` and posts results as a PR comment. The CI quality gate itself still keys off faithfulness only (unchanged threshold semantics); context precision/recall are reported alongside for visibility.
 
 ---
 
