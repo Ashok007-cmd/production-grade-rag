@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # ---------- Embedding model ----------
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     embedding_dim: int = 384
+    # LRU cache size for repeated/paraphrased query embeddings (0 disables caching).
+    embedding_query_cache_size: int = 256
 
     # ---------- Chunking ----------
     chunk_size: int = 800

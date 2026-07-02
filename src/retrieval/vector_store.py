@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ class VectorStore:
         embedding_dim: int = 384,
         chroma_host: str | None = None,
         chroma_port: int | None = None,
+        embedding_query_cache_size: int = 256,
     ) -> None:
         self.collection_name = collection_name
         self.persist_path = Path(persist_path) if persist_path else Path("data/chroma_db")
@@ -45,7 +47,9 @@ class VectorStore:
         self.chroma_port = chroma_port
 
         # Lazy-load embedding function
-        self._embedding_fn = _ChromaEmbeddingFunction(model_name=embedding_model)
+        self._embedding_fn = _ChromaEmbeddingFunction(
+            model_name=embedding_model, query_cache_size=embedding_query_cache_size
+        )
 
         # Initialise ChromaDB client
         if self.chroma_host:
@@ -135,6 +139,10 @@ class VectorStore:
     def count(self) -> int:
         """Return the number of chunks in the collection."""
         return retry_with_backoff(self._collection.count, retries=3, backoff_in_seconds=0.5)
+
+    def embedding_cache_stats(self) -> dict[str, int]:
+        """Return query-embedding cache hit/miss/size counters for this store."""
+        return self._embedding_fn.cache_stats()
 
     # ------------------------------------------------------------------
     # Retrieval
@@ -249,9 +257,13 @@ class _ChromaEmbeddingFunction:
     VectorStore instances (e.g. per language) don't duplicate model memory.
     """
 
-    def __init__(self, model_name: str) -> None:
+    def __init__(self, model_name: str, query_cache_size: int = 256) -> None:
         self.model_name = model_name
         self._model = None
+        self._query_cache_size = query_cache_size
+        self._query_cache: OrderedDict[str, list[float]] = OrderedDict()
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     # ChromaDB >= 0.6 calls these methods to detect the embedding function's
     # capabilities and bypass the "legacy" serialization code path.
@@ -301,8 +313,48 @@ class _ChromaEmbeddingFunction:
         self._model = model
 
     def embed_query(self, input: list[str]) -> list[list[float]]:
-        """Embed queries for retrieval (ChromaDB >= 0.5)."""
-        return self._encode(input)
+        """Embed queries for retrieval (ChromaDB >= 0.5).
+
+        Repeated or paraphrased queries (common across eval runs and demos)
+        hit an in-process LRU cache instead of re-running the embedding
+        model. Document embedding (``embed_document``) intentionally does
+        not use this cache — corpus text is rarely repeated and caching it
+        would grow unbounded with ingestion volume.
+        """
+        if self._query_cache_size <= 0:
+            return self._encode(input)
+
+        results: list[list[float] | None] = [None] * len(input)
+        misses: list[tuple[int, str]] = []
+
+        for i, text in enumerate(input):
+            cached = self._query_cache.get(text)
+            if cached is not None:
+                self._query_cache.move_to_end(text)
+                self._cache_hits += 1
+                results[i] = cached
+            else:
+                misses.append((i, text))
+
+        if misses:
+            self._cache_misses += len(misses)
+            embedded = self._encode([text for _, text in misses])
+            for (i, text), vector in zip(misses, embedded, strict=True):
+                results[i] = vector
+                self._query_cache[text] = vector
+                self._query_cache.move_to_end(text)
+                if len(self._query_cache) > self._query_cache_size:
+                    self._query_cache.popitem(last=False)
+
+        return results  # type: ignore[return-value]  # every slot filled above
+
+    def cache_stats(self) -> dict[str, int]:
+        """Return query-embedding cache hit/miss/current-size counters."""
+        return {
+            "hits": self._cache_hits,
+            "misses": self._cache_misses,
+            "size": len(self._query_cache),
+        }
 
     def embed_document(self, input: list[str]) -> list[list[float]]:
         """Embed documents for indexing (ChromaDB >= 0.5)."""

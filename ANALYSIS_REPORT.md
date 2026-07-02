@@ -217,7 +217,7 @@ Tokenizer now uses `re.split(r"[^a-zA-Z0-9À-ɏ]+", text.lower())` which:
 | HIGH | Graph RAG path (entity extraction + knowledge graph retrieval) | High | Cutting-edge, differentiating |
 | MEDIUM | Multi-tenant collection isolation (user-scoped document namespaces) | Medium | SaaS-readiness |
 | MEDIUM | Document version tracking (re-ingest detection, dedup by content hash) | Medium | Data integrity |
-| MEDIUM | Cached embedding layer (Redis/LRU) for repeated query embeddings | Low | Performance optimization |
+| ~~MEDIUM~~ | ~~Cached embedding layer (Redis/LRU) for repeated query embeddings~~ | ~~Low~~ | **Implemented in Round 4 — see below** |
 | MEDIUM | `pip-compile` lockfile with hash verification | Low | Supply chain security |
 | LOW | WebSocket endpoint for streaming (alternative to SSE) | Low | Protocol flexibility |
 | LOW | OpenAPI 3.1 schema export with examples | Low | API documentation |
@@ -335,8 +335,10 @@ Building on the Round 1 roadmap table, here are the top four items with enough d
 **A. Prometheus `/metrics` endpoint — implemented in Round 3**
 Added a dedicated `prometheus_client.CollectorRegistry` in `src/api/app.py`, a `_PrometheusMiddleware` that records a `rag_http_requests_total` counter and `rag_http_request_duration_seconds` histogram (labeled by route path, method, status code) on every request, and a `GET /metrics` route returning `generate_latest()`. Verified live against a running server: real counters/histograms observed for `/healthz`, `/stats`, and `/ingest`, correctly bucketing a slow (~82s cold-start) ingestion call. Covered by a new test in `tests/test_api.py`. This is intentionally independent of the existing push-based OTel/Langfuse pipeline in `src/monitoring/` (which isn't currently wired into the FastAPI app at all — `src/api/app.py` uses a plain `RAGPipeline`, not `MonitoredRAGPipeline` — a gap worth closing in a future round if OTel-based dashboards are wanted alongside Prometheus scraping).
 
-**B. Cached embedding layer**
-`src/retrieval/vector_store.py`'s `similarity_search()` re-embeds the query text on every call. Add an LRU cache (`functools.lru_cache` or a small Redis-backed cache behind the same interface) keyed on `(embedding_model, query_text)` ahead of the embedding call. For repeated/paraphrased queries in eval runs and demos this cuts embedding latency to near-zero on cache hits — an easy, visible performance win to cite in interviews.
+**B. Cached embedding layer — implemented in Round 4**
+Added an in-process `OrderedDict`-based LRU cache inside `_ChromaEmbeddingFunction.embed_query()` (`src/retrieval/vector_store.py`), keyed on raw query text, size-configurable via `RAG_EMBEDDING_QUERY_CACHE_SIZE` (default 256, `0` disables). Deliberately scoped to *query* embeddings only — `embed_document()` is untouched, since corpus text is rarely repeated and caching it would grow unbounded with ingestion volume. Hit/miss counters are exposed via `VectorStore.embedding_cache_stats()` → `RAGPipeline.stats()` → the `/stats` API response.
+
+Verified live against the real embedding model and real ChromaDB `.query()` call path (not a mock): a repeated identical query dropped from ~7ms to ~0.7ms (~10x), and cache stats matched exactly (`{"hits": 1, "misses": 2, "size": 2}` for two distinct queries with one repeat). This also confirmed a fact that wasn't obvious from reading the code alone — Chroma's modern `.query()` path calls `embed_query()` specifically (not the legacy `__call__` fallback), so the cache genuinely engages in production. Six new unit/integration tests cover cache hits, misses, LRU eviction, the disable-via-zero path, and that document embedding is correctly excluded from caching.
 
 **C. RAGAS-style eval dimensions (context precision/recall)**
 `src/evaluation/metrics.py` currently implements faithfulness + answer-relevance via LLM-as-judge (`FaithfulnessScorer`, `AnswerRelevanceScorer`). Adding **context precision** (are retrieved chunks actually relevant, penalizing irrelevant-but-retrieved chunks) and **context recall** (did retrieval surface everything needed, measured against the golden dataset's reference answer) would close the gap with RAGAS's standard 4-metric suite. Both can reuse the existing `_extract_json_object` parser and `LLMClient` plumbing — just two new prompt templates and scorer classes following the exact pattern already in the file.
@@ -389,5 +391,16 @@ Beyond bug fixes, one concrete feature from the improvement roadmap (item A, Pro
 Final verification after this addition: **125 tests pass** (124 + 1 new), `mypy` and `ruff` both clean.
 
 ---
+---
 
-*Round 2 analysis performed via parallel automated audits (full-codebase pentest sweep, `pip-audit`-verified dependency scan) plus direct code review for architecture/improvement depth. Round 3 performed via full dependency install, live server smoke testing, and a real feature implementation. All fixes and additions above are applied in the working tree as of this report.*
+# Round 4 — Cached Embedding Layer
+
+**Date:** 2026-07-02
+
+Implemented improvement roadmap item B (see section B above for full design/verification detail): an in-process LRU cache for query embeddings in `src/retrieval/vector_store.py`, configurable via `RAG_EMBEDDING_QUERY_CACHE_SIZE`, with hit/miss stats surfaced through `/stats`. Six new tests added (`tests/test_retrieval.py`): four unit tests against `_ChromaEmbeddingFunction` in isolation (cache hit, cache miss, LRU eviction, disable-via-zero, document-embedding exclusion) and one integration test confirming the cache engages through the real `VectorStore.similarity_search()` → ChromaDB `.query()` path.
+
+**Final verification: 131 tests pass** (125 + 6 new), `mypy` and `ruff` both clean, and live-verified against the real `sentence-transformers` model with a measured ~10x latency drop on a cache hit.
+
+---
+
+*Round 2 analysis performed via parallel automated audits (full-codebase pentest sweep, `pip-audit`-verified dependency scan) plus direct code review for architecture/improvement depth. Round 3 performed via full dependency install, live server smoke testing, and a real feature implementation. Round 4 added a second roadmap feature (cached embeddings) with the same real-code-plus-live-verification bar. All fixes and additions above are applied in the working tree as of this report.*

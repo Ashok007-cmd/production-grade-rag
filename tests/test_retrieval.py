@@ -154,6 +154,96 @@ class TestVectorStore:
         assert add_calls == [2, 2, 1]
         assert vector_store.count() == 5
 
+    def test_repeated_query_hits_embedding_cache(
+        self, indexed_store: VectorStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A repeated query string should not re-invoke the embedding model."""
+        embedding_fn = indexed_store._embedding_fn
+        encode_calls: list[list[str]] = []
+        original_encode = type(embedding_fn)._encode
+
+        def counting_encode(self, input_texts: list[str]) -> list[list[float]]:
+            encode_calls.append(list(input_texts))
+            return original_encode(self, input_texts)
+
+        monkeypatch.setattr(type(embedding_fn), "_encode", counting_encode)
+
+        indexed_store.similarity_search("What is RAG?", k=2)
+        indexed_store.similarity_search("What is RAG?", k=2)
+        indexed_store.similarity_search("A different question entirely", k=2)
+
+        # Two distinct query strings were embedded; the repeat was a cache hit.
+        assert len(encode_calls) == 2
+        stats = indexed_store.embedding_cache_stats()
+        assert stats["hits"] == 1
+        assert stats["misses"] == 2
+        assert stats["size"] == 2
+
+
+class TestQueryEmbeddingCache:
+    """Unit tests for the LRU query-embedding cache in isolation from Chroma."""
+
+    def _make_fn(self, cache_size: int = 8):
+        from src.retrieval.vector_store import _ChromaEmbeddingFunction
+
+        fn = _ChromaEmbeddingFunction(model_name="dummy-model", query_cache_size=cache_size)
+        calls: list[list[str]] = []
+
+        def fake_encode(self, input_texts: list[str]) -> list[list[float]]:
+            calls.append(list(input_texts))
+            return [[float(len(t))] for t in input_texts]
+
+        fn._encode = fake_encode.__get__(fn)  # bind as instance method
+        return fn, calls
+
+    def test_identical_query_is_a_cache_hit(self) -> None:
+        fn, calls = self._make_fn()
+
+        first = fn.embed_query(["what is rag?"])
+        second = fn.embed_query(["what is rag?"])
+
+        assert first == second
+        assert calls == [["what is rag?"]]  # only encoded once
+        assert fn.cache_stats() == {"hits": 1, "misses": 1, "size": 1}
+
+    def test_distinct_queries_are_cache_misses(self) -> None:
+        fn, calls = self._make_fn()
+
+        fn.embed_query(["question one"])
+        fn.embed_query(["question two"])
+
+        assert calls == [["question one"], ["question two"]]
+        assert fn.cache_stats() == {"hits": 0, "misses": 2, "size": 2}
+
+    def test_cache_evicts_least_recently_used_beyond_maxsize(self) -> None:
+        fn, calls = self._make_fn(cache_size=2)
+
+        fn.embed_query(["a"])
+        fn.embed_query(["b"])
+        fn.embed_query(["c"])  # evicts "a" (least recently used)
+        fn.embed_query(["a"])  # miss again — was evicted
+
+        assert calls == [["a"], ["b"], ["c"], ["a"]]
+        assert fn.cache_stats()["size"] == 2
+
+    def test_cache_size_zero_disables_caching(self) -> None:
+        fn, calls = self._make_fn(cache_size=0)
+
+        fn.embed_query(["repeat"])
+        fn.embed_query(["repeat"])
+
+        assert calls == [["repeat"], ["repeat"]]
+        assert fn.cache_stats() == {"hits": 0, "misses": 0, "size": 0}
+
+    def test_document_embedding_does_not_use_query_cache(self) -> None:
+        fn, calls = self._make_fn()
+
+        fn.embed_document(["same text"])
+        fn.embed_document(["same text"])
+
+        assert calls == [["same text"], ["same text"]]  # not deduped
+        assert fn.cache_stats() == {"hits": 0, "misses": 0, "size": 0}
+
 
 # ---------------------------------------------------------------------------
 # Hybrid & Reranker Tests (Phase 2)

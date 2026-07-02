@@ -281,6 +281,8 @@ class StatsResponse(BaseModel):
     llm_model: str
     chunk_size: int
     chunk_overlap: int
+    embedding_cache_hits: int
+    embedding_cache_misses: int
 
 
 class IngestRequest(BaseModel):

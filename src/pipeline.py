@@ -115,6 +115,7 @@ class RAGPipeline:
                     embedding_dim=self.config.embedding_dim,
                     chroma_host=self.config.chroma_host,
                     chroma_port=self.config.chroma_port,
+                    embedding_query_cache_size=self.config.embedding_query_cache_size,
                 )
             return self._vector_stores[lang]
 
@@ -397,6 +398,7 @@ class RAGPipeline:
 
     def stats(self) -> dict[str, Any]:
         """Return pipeline statistics (defaulting to English for backward compatibility)."""
+        cache_stats = self.vector_store.embedding_cache_stats()
         return {
             "chunks_in_store": self.vector_store.count(),
             "embedding_model": self.config.embedding_model,
@@ -404,4 +406,6 @@ class RAGPipeline:
             "llm_model": self.config.llm_model,
             "chunk_size": self.config.chunk_size,
             "chunk_overlap": self.config.chunk_overlap,
+            "embedding_cache_hits": cache_stats["hits"],
+            "embedding_cache_misses": cache_stats["misses"],
         }
